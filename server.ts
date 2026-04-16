@@ -20,6 +20,7 @@ const getGenAI = () => {
     console.error('GEMINI_API_KEY is missing');
     return null;
   }
+  // Forzamos v1beta ya que es lo que funcionó en el curl del usuario
   return new GoogleGenerativeAI(apiKey);
 };
 
@@ -74,8 +75,8 @@ app.post('/api/analyze', async (req, res) => {
       return res.status(500).json({ error: 'Configuración de IA incompleta (Falta API Key)' });
     }
 
-    // Usamos el alias más compatible
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+    // Usamos el alias más compatible con explicit apiVersion
+    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" }, { apiVersion: 'v1beta' });
     
     const prompt = "Analiza esta captura de pantalla de un perfil de Instagram y extrae la siguiente información en formato JSON: brandName (Nombre de la marca), username (Handle/Username con @), followers (Número de seguidores como entero), industry (Industria/Sector inferido), contact (Email si aparece), phone (Número de teléfono si aparece), profileLink (Link al perfil si se puede inferir).";
 
@@ -98,12 +99,19 @@ app.post('/api/analyze', async (req, res) => {
     } catch (apiError: any) {
       console.error('Gemini API Error:', apiError);
       
-      // Si falla el 1.5-flash, intentamos con el alias exacto del curl del usuario o el -latest
+      // Si falla, intentamos con varios fallbacks y versiones
       if (apiError.message?.includes('404') || apiError.message?.includes('not found')) {
-        const fallbacks = ["gemini-flash-latest", "gemini-1.5-flash-latest", "gemini-1.5-flash"];
-        for (const modelName of fallbacks) {
+        const fallbacks = [
+          { name: "gemini-1.5-flash-latest", version: 'v1beta' },
+          { name: "gemini-flash-latest", version: 'v1beta' },
+          { name: "gemini-1.5-flash", version: 'v1' },
+          { name: "gemini-1.5-pro", version: 'v1beta' }
+        ];
+        
+        for (const fb of fallbacks) {
           try {
-            const fallbackModel = genAI.getGenerativeModel({ model: modelName });
+            console.log(`Intentando fallback: ${fb.name} (${fb.version})`);
+            const fallbackModel = genAI.getGenerativeModel({ model: fb.name }, { apiVersion: fb.version });
             const result = await fallbackModel.generateContent([
               { inlineData: { mimeType, data: image } },
               { text: prompt },
@@ -113,11 +121,11 @@ app.post('/api/analyze', async (req, res) => {
             const cleanJson = text.replace(/```json\n?|\n?```/g, '').trim();
             return res.json(JSON.parse(cleanJson));
           } catch (e) {
-            console.warn(`Fallback to ${modelName} failed:`, e);
+            console.warn(`Fallback to ${fb.name} failed:`, e);
             continue;
           }
         }
-        throw new Error(`Error de modelo (404): Ninguno de los modelos disponibles (flash, flash-latest) funcionó con tu API Key. Verifica que Gemini esté habilitado en tu consola de Google Cloud.`);
+        throw new Error(`Error de modelo (404): No se encontró un modelo compatible. Verifica que Gemini esté habilitado en tu consola de Google Cloud y que tu API Key sea válida para modelos 'flash'.`);
       }
       
       if (apiError.message?.includes('429')) {
