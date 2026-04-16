@@ -1,0 +1,6 @@
+{
+  "name": "OUTBOUND HUBOO",
+  "description": "Web app for automatic Instagram brand prospecting using Gemini Vision and Google Sheets.",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}
