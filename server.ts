@@ -100,19 +100,24 @@ app.post('/api/analyze', async (req, res) => {
       
       // Si falla el 1.5-flash, intentamos con el alias exacto del curl del usuario o el -latest
       if (apiError.message?.includes('404') || apiError.message?.includes('not found')) {
-        try {
-          const fallbackModel = genAI.getGenerativeModel({ model: "gemini-1.5-flash-latest" });
-          const result = await fallbackModel.generateContent([
-            { inlineData: { mimeType, data: image } },
-            { text: prompt },
-          ]);
-          const response = await result.response;
-          const text = response.text();
-          const cleanJson = text.replace(/```json\n?|\n?```/g, '').trim();
-          return res.json(JSON.parse(cleanJson));
-        } catch (fallbackError: any) {
-          throw new Error(`Error de modelo (404): El modelo no está disponible para tu API Key. Verifica que Gemini esté habilitado en tu consola de Google Cloud. Detalle: ${fallbackError.message}`);
+        const fallbacks = ["gemini-flash-latest", "gemini-1.5-flash-latest", "gemini-1.5-flash"];
+        for (const modelName of fallbacks) {
+          try {
+            const fallbackModel = genAI.getGenerativeModel({ model: modelName });
+            const result = await fallbackModel.generateContent([
+              { inlineData: { mimeType, data: image } },
+              { text: prompt },
+            ]);
+            const response = await result.response;
+            const text = response.text();
+            const cleanJson = text.replace(/```json\n?|\n?```/g, '').trim();
+            return res.json(JSON.parse(cleanJson));
+          } catch (e) {
+            console.warn(`Fallback to ${modelName} failed:`, e);
+            continue;
+          }
         }
+        throw new Error(`Error de modelo (404): Ninguno de los modelos disponibles (flash, flash-latest) funcionó con tu API Key. Verifica que Gemini esté habilitado en tu consola de Google Cloud.`);
       }
       
       if (apiError.message?.includes('429')) {

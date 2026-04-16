@@ -96,19 +96,24 @@ app.post('/api/analyze', async (req, res) => {
       
       // Si falla el 1.5-flash, intentamos con el alias exacto del curl del usuario o el -latest
       if (apiError.message?.includes('404') || apiError.message?.includes('not found')) {
-        try {
-          const fallbackModel = genAI.getGenerativeModel({ model: "gemini-1.5-flash-latest" });
-          const result = await fallbackModel.generateContent([
-            { inlineData: { mimeType, data: image } },
-            { text: prompt },
-          ]);
-          const response = await result.response;
-          const text = response.text();
-          const cleanJson = text.replace(/```json\n?|\n?```/g, '').trim();
-          return res.json(JSON.parse(cleanJson));
-        } catch (fallbackError: any) {
-          throw new Error(`Error de modelo (404): El modelo no está disponible para tu API Key. Verifica que Gemini esté habilitado en tu consola de Google Cloud. Detalle: ${fallbackError.message}`);
+        const fallbacks = ["gemini-flash-latest", "gemini-1.5-flash-latest", "gemini-1.5-flash"];
+        for (const modelName of fallbacks) {
+          try {
+            const fallbackModel = genAI.getGenerativeModel({ model: modelName });
+            const result = await fallbackModel.generateContent([
+              { inlineData: { mimeType, data: image } },
+              { text: prompt },
+            ]);
+            const response = await result.response;
+            const text = response.text();
+            const cleanJson = text.replace(/```json\n?|\n?```/g, '').trim();
+            return res.json(JSON.parse(cleanJson));
+          } catch (e) {
+            console.warn(`Fallback to ${modelName} failed:`, e);
+            continue;
+          }
         }
+        throw new Error(`Error de modelo (404): Ninguno de los modelos disponibles (flash, flash-latest) funcionó con tu API Key. Verifica que Gemini esté habilitado en tu consola de Google Cloud.`);
       }
       
       if (apiError.message?.includes('429')) {
@@ -153,11 +158,36 @@ app.get('/api/prospects', async (req, res) => {
 
     const last5 = data.slice(-5).reverse();
     const totalARR = data.reduce((sum, item) => {
-      const arrValue = parseFloat(item.ARR?.replace(/[€$,]/g, '') || '0');
+      let val = (item.ARR || '').toString().replace(/[€$]/g, '').trim();
+      // If it contains both . and , it's likely formatted. 
+      // Example: 1.234,56 or 1,234.56
+      if (val.includes('.') && val.includes(',')) {
+        if (val.lastIndexOf('.') > val.lastIndexOf(',')) {
+          // US Format: 1,234.56 -> remove comma
+          val = val.replace(/,/g, '');
+        } else {
+          // EU Format: 1.234,56 -> remove dot, replace comma with dot
+          val = val.replace(/\./g, '').replace(',', '.');
+        }
+      } else if (val.includes(',')) {
+        // Only comma: could be 1234,56 (EU) or 1,234 (US thousand)
+        // If it's followed by 2 digits, it's likely decimal
+        const parts = val.split(',');
+        if (parts[parts.length - 1].length === 2) {
+          val = val.replace(',', '.');
+        } else {
+          val = val.replace(',', '');
+        }
+      }
+      const arrValue = parseFloat(val || '0');
       return sum + (isNaN(arrValue) ? 0 : arrValue);
     }, 0);
 
-    res.json({ last5, totalARR });
+    res.json({ 
+      last5, 
+      totalARR,
+      totalProspects: data.length
+    });
   } catch (error: any) {
     console.error('Error fetching prospects:', error);
     res.status(500).json({ error: error.message });

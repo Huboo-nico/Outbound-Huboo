@@ -59,6 +59,7 @@ export default function App() {
   const [extractedData, setExtractedData] = useState<ExtractedData | null>(null);
   const [lastProspects, setLastProspects] = useState<Prospect[]>([]);
   const [totalARR, setTotalARR] = useState(0);
+  const [totalProspects, setTotalProspects] = useState(0);
   const [isLoadingData, setIsLoadingData] = useState(true);
 
   const loadDashboardData = useCallback(async () => {
@@ -68,6 +69,7 @@ export default function App() {
         const data = await response.json();
         setLastProspects(data.last5 || []);
         setTotalARR(data.totalARR || 0);
+        setTotalProspects(data.totalProspects || 0);
       } else {
         const errorData = await response.json();
         console.error('Error loading dashboard:', errorData.error);
@@ -201,32 +203,26 @@ export default function App() {
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
         <div className="grid grid-cols-12 gap-4">
           {/* Metrics Row */}
-          <Card className="col-span-12 md:col-span-3 border-bento-border shadow-none flex flex-col justify-center text-center p-6">
+          <Card className="col-span-12 md:col-span-4 border-bento-border shadow-none flex flex-col justify-center text-center p-6">
             <span className="text-[10px] text-bento-text-muted uppercase tracking-widest font-bold mb-1">Total ARR Prospectado</span>
             <div className="text-2xl font-bold text-huboo-blue">
               {isLoadingData ? <Skeleton className="h-8 w-24 mx-auto" /> : `${totalARR.toLocaleString()}€`}
             </div>
-            <span className="text-[10px] text-green-500 font-medium mt-1">↑ 12% vs last week</span>
+            <span className="text-[10px] text-green-500 font-medium mt-1">Suma real de base de datos</span>
           </Card>
 
-          <Card className="col-span-12 md:col-span-3 border-bento-border shadow-none flex flex-col justify-center text-center p-6">
+          <Card className="col-span-12 md:col-span-4 border-bento-border shadow-none flex flex-col justify-center text-center p-6">
             <span className="text-[10px] text-bento-text-muted uppercase tracking-widest font-bold mb-1">Marcas Analizadas</span>
             <div className="text-2xl font-bold text-huboo-blue">
-              {isLoadingData ? <Skeleton className="h-8 w-12 mx-auto" /> : '42'}
+              {isLoadingData ? <Skeleton className="h-8 w-12 mx-auto" /> : totalProspects}
             </div>
             <span className="text-[10px] text-bento-text-muted mt-1">KPI: 50 / Mes</span>
           </Card>
 
-          <Card className="col-span-12 md:col-span-3 border-bento-border shadow-none flex flex-col justify-center text-center p-6">
+          <Card className="col-span-12 md:col-span-4 border-bento-border shadow-none flex flex-col justify-center text-center p-6">
             <span className="text-[10px] text-bento-text-muted uppercase tracking-widest font-bold mb-1">Conversión Estimada</span>
             <div className="text-2xl font-bold text-huboo-blue">18.4%</div>
             <span className="text-[10px] text-bento-text-muted mt-1">Model: Huboo-Logit-v2</span>
-          </Card>
-
-          <Card className="col-span-12 md:col-span-3 border-bento-border shadow-none flex flex-col justify-center text-center p-6">
-            <span className="text-[10px] text-bento-text-muted uppercase tracking-widest font-bold mb-1">Fuga de Leads</span>
-            <div className="text-2xl font-bold text-red-500">2</div>
-            <span className="text-[10px] text-red-400 mt-1">Duplicates prevented</span>
           </Card>
 
           {/* Upload & Analysis Section */}
