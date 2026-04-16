@@ -183,12 +183,22 @@ export default function App() {
       <header className="bg-bento-sidebar text-white border-b border-white/10 sticky top-0 z-50">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <img 
-              src="/logo.png" 
-              alt="Huboo Logo" 
-              className="w-10 h-10 object-contain rounded-md shadow-sm border border-white/10"
-              referrerPolicy="no-referrer"
-            />
+            <div className="relative w-10 h-10">
+              <img 
+                src="/logo.png" 
+                alt="Huboo Logo" 
+                className="w-full h-full object-contain rounded-md shadow-sm border border-white/10"
+                referrerPolicy="no-referrer"
+                onError={(e) => {
+                  e.currentTarget.style.display = 'none';
+                  const fallback = e.currentTarget.parentElement?.querySelector('.logo-fallback');
+                  if (fallback) (fallback as HTMLElement).style.display = 'flex';
+                }}
+              />
+              <div className="logo-fallback hidden absolute inset-0 items-center justify-center bg-huboo-blue rounded-md border border-white/10">
+                <Instagram size={20} className="text-white" />
+              </div>
+            </div>
             <h1 className="text-lg font-bold tracking-tight">OUTBOUND <span className="text-white/80">HUBOO</span></h1>
           </div>
           <div className="flex items-center gap-4">
