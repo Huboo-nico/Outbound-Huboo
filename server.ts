@@ -14,7 +14,14 @@ const PORT = 3000;
 app.use(express.json({ limit: '10mb' }));
 
 // Gemini Setup
-const genAI = new GoogleGenerativeAI((process.env.GEMINI_API_KEY || '').trim());
+const getGenAI = () => {
+  const apiKey = (process.env.GEMINI_API_KEY || '').trim().replace(/["']/g, '');
+  if (!apiKey) {
+    console.error('GEMINI_API_KEY is missing');
+    return null;
+  }
+  return new GoogleGenerativeAI(apiKey);
+};
 
 // Google Sheets Setup
 const getSheetsClient = () => {
@@ -62,26 +69,58 @@ app.post('/api/analyze', async (req, res) => {
       return res.status(400).json({ error: 'Imagen y tipo MIME son requeridos' });
     }
 
+    const genAI = getGenAI();
+    if (!genAI) {
+      return res.status(500).json({ error: 'Configuración de IA incompleta (Falta API Key)' });
+    }
+
+    // Usamos el alias más compatible
     const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
     
     const prompt = "Analiza esta captura de pantalla de un perfil de Instagram y extrae la siguiente información en formato JSON: brandName (Nombre de la marca), username (Handle/Username con @), followers (Número de seguidores como entero), industry (Industria/Sector inferido), contact (Email si aparece), phone (Número de teléfono si aparece), profileLink (Link al perfil si se puede inferir).";
 
-    const result = await model.generateContent([
-      {
-        inlineData: {
-          mimeType: mimeType,
-          data: image,
+    try {
+      const result = await model.generateContent([
+        {
+          inlineData: {
+            mimeType: mimeType,
+            data: image,
+          },
         },
-      },
-      { text: prompt },
-    ]);
+        { text: prompt },
+      ]);
 
-    const response = await result.response;
-    const text = response.text();
-    
-    // Clean up potential markdown code blocks
-    const cleanJson = text.replace(/```json\n?|\n?```/g, '').trim();
-    res.json(JSON.parse(cleanJson));
+      const response = await result.response;
+      const text = response.text();
+      
+      const cleanJson = text.replace(/```json\n?|\n?```/g, '').trim();
+      res.json(JSON.parse(cleanJson));
+    } catch (apiError: any) {
+      console.error('Gemini API Error:', apiError);
+      
+      // Si falla el 1.5-flash, intentamos con el alias exacto del curl del usuario o el -latest
+      if (apiError.message?.includes('404') || apiError.message?.includes('not found')) {
+        try {
+          const fallbackModel = genAI.getGenerativeModel({ model: "gemini-1.5-flash-latest" });
+          const result = await fallbackModel.generateContent([
+            { inlineData: { mimeType, data: image } },
+            { text: prompt },
+          ]);
+          const response = await result.response;
+          const text = response.text();
+          const cleanJson = text.replace(/```json\n?|\n?```/g, '').trim();
+          return res.json(JSON.parse(cleanJson));
+        } catch (fallbackError: any) {
+          throw new Error(`Error de modelo (404): El modelo no está disponible para tu API Key. Verifica que Gemini esté habilitado en tu consola de Google Cloud. Detalle: ${fallbackError.message}`);
+        }
+      }
+      
+      if (apiError.message?.includes('429')) {
+        throw new Error('Límite de cuota excedido. Por favor, espera un minuto antes de intentar de nuevo.');
+      }
+      
+      throw apiError;
+    }
   } catch (error: any) {
     console.error('Error in /api/analyze:', error);
     res.status(500).json({ error: error.message });
