@@ -3,6 +3,7 @@ import { createServer as createViteServer } from 'vite';
 import path from 'path';
 import { google } from 'googleapis';
 import { JWT } from 'google-auth-library';
+import { GoogleGenAI } from '@google/genai';
 import dotenv from 'dotenv';
 
 dotenv.config();
@@ -10,7 +11,10 @@ dotenv.config();
 const app = express();
 const PORT = 3000;
 
-app.use(express.json());
+app.use(express.json({ limit: '10mb' }));
+
+// Gemini Setup
+const genAI = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
 
 // Google Sheets Setup
 const getSheetsClient = () => {
@@ -51,6 +55,41 @@ const SPREADSHEET_ID = getSpreadsheetId();
 const RANGE = 'Sheet1!A:I';
 
 // API Routes
+app.post('/api/analyze', async (req, res) => {
+  try {
+    const { image, mimeType } = req.body;
+    if (!image || !mimeType) {
+      return res.status(400).json({ error: 'Imagen y tipo MIME son requeridos' });
+    }
+
+    const response = await genAI.models.generateContent({
+      model: "gemini-1.5-flash",
+      contents: {
+        parts: [
+          {
+            inlineData: {
+              mimeType: mimeType,
+              data: image,
+            },
+          },
+          {
+            text: "Analiza esta captura de pantalla de un perfil de Instagram y extrae la siguiente información en formato JSON: brandName (Nombre de la marca), username (Handle/Username con @), followers (Número de seguidores como entero), industry (Industria/Sector inferido), contact (Email si aparece), phone (Número de teléfono si aparece), profileLink (Link al perfil si se puede inferir).",
+          },
+        ],
+      },
+      config: {
+        responseMimeType: "application/json",
+      },
+    });
+
+    const text = response.text;
+    res.json(JSON.parse(text));
+  } catch (error: any) {
+    console.error('Error in /api/analyze:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 app.get('/api/prospects', async (req, res) => {
   try {
     const sheets = getSheetsClient();
