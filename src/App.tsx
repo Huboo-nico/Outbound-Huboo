@@ -186,7 +186,7 @@ export default function App() {
             <img 
               src="/logo.png" 
               alt="Huboo Logo" 
-              className="w-8 h-8 object-contain"
+              className="w-10 h-10 object-contain rounded-md shadow-sm border border-white/10"
               referrerPolicy="no-referrer"
             />
             <h1 className="text-lg font-bold tracking-tight">OUTBOUND <span className="text-white/80">HUBOO</span></h1>
