@@ -1,7 +1,7 @@
 import express from 'express';
 import { google } from 'googleapis';
 import { JWT } from 'google-auth-library';
-import { GoogleGenAI } from '@google/genai';
+import { GoogleGenerativeAI } from '@google/generative-ai';
 import dotenv from 'dotenv';
 
 dotenv.config();
@@ -10,7 +10,7 @@ const app = express();
 app.use(express.json({ limit: '10mb' }));
 
 // Gemini Setup
-const genAI = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
 
 // Google Sheets Setup
 const getSheetsClient = () => {
@@ -58,28 +58,26 @@ app.post('/api/analyze', async (req, res) => {
       return res.status(400).json({ error: 'Imagen y tipo MIME son requeridos' });
     }
 
-    const response = await genAI.models.generateContent({
-      model: "gemini-1.5-flash",
-      contents: {
-        parts: [
-          {
-            inlineData: {
-              mimeType: mimeType,
-              data: image,
-            },
-          },
-          {
-            text: "Analiza esta captura de pantalla de un perfil de Instagram y extrae la siguiente información en formato JSON: brandName (Nombre de la marca), username (Handle/Username con @), followers (Número de seguidores como entero), industry (Industria/Sector inferido), contact (Email si aparece), phone (Número de teléfono si aparece), profileLink (Link al perfil si se puede inferir).",
-          },
-        ],
-      },
-      config: {
-        responseMimeType: "application/json",
-      },
-    });
+    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+    
+    const prompt = "Analiza esta captura de pantalla de un perfil de Instagram y extrae la siguiente información en formato JSON: brandName (Nombre de la marca), username (Handle/Username con @), followers (Número de seguidores como entero), industry (Industria/Sector inferido), contact (Email si aparece), phone (Número de teléfono si aparece), profileLink (Link al perfil si se puede inferir).";
 
-    const text = response.text;
-    res.json(JSON.parse(text));
+    const result = await model.generateContent([
+      {
+        inlineData: {
+          mimeType: mimeType,
+          data: image,
+        },
+      },
+      { text: prompt },
+    ]);
+
+    const response = await result.response;
+    const text = response.text();
+    
+    // Clean up potential markdown code blocks
+    const cleanJson = text.replace(/```json\n?|\n?```/g, '').trim();
+    res.json(JSON.parse(cleanJson));
   } catch (error: any) {
     console.error('Error in /api/analyze:', error);
     res.status(500).json({ error: error.message });
