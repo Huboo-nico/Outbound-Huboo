@@ -19,6 +19,55 @@ const getGenAI = () => {
   return new GoogleGenerativeAI(apiKey);
 };
 
+// OpenRouter Fallback Helper
+const callOpenRouter = async (image: string, mimeType: string, prompt: string) => {
+  const apiKey = (process.env.OPENROUTER_API_KEY || '').trim().replace(/["']/g, '');
+  if (!apiKey) {
+    console.warn('OPENROUTER_API_KEY is missing, skipping fallback');
+    return null;
+  }
+
+  try {
+    console.log('Intentando fallback con OpenRouter...');
+    const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+        "HTTP-Referer": process.env.APP_URL || "https://ai.studio",
+        "X-Title": "Outbound Huboo Prospector"
+      },
+      body: JSON.stringify({
+        "model": "google/gemini-flash-1.5",
+        "messages": [
+          {
+            "role": "user",
+            "content": [
+              { "type": "text", "text": prompt },
+              {
+                "type": "image_url",
+                "image_url": {
+                  "url": `data:${mimeType};base64,${image}`
+                }
+              }
+            ]
+          }
+        ]
+      })
+    });
+
+    const data: any = await response.json();
+    if (data.error) {
+      console.error('OpenRouter Error:', data.error);
+      return null;
+    }
+    return data.choices?.[0]?.message?.content || null;
+  } catch (error) {
+    console.error('OpenRouter Exception:', error);
+    return null;
+  }
+};
+
 // Google Sheets Setup
 const getSheetsClient = () => {
   const email = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
@@ -120,7 +169,15 @@ app.post('/api/analyze', async (req, res) => {
             continue;
           }
         }
-        throw new Error(`Error de modelo (404): No se encontró un modelo compatible. Verifica que Gemini esté habilitado en tu consola de Google Cloud y que tu API Key sea válida para modelos 'flash'.`);
+
+        // --- ÚLTIMA OPCIÓN: OPENROUTER ---
+        const orResult = await callOpenRouter(image, mimeType, prompt);
+        if (orResult) {
+          const cleanJson = orResult.replace(/```json\n?|\n?```/g, '').trim();
+          return res.json(JSON.parse(cleanJson));
+        }
+
+        throw new Error(`Error de modelo (404): No se encontró un modelo compatible en Google Cloud ni OpenRouter. Verifica tus API Keys.`);
       }
       
       if (apiError.message?.includes('429')) {
