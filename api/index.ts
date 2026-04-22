@@ -185,70 +185,78 @@ app.post('/api/analyze', async (req, res) => {
 
     const prompt = "Analiza esta captura de pantalla de un perfil de Instagram y extrae la siguiente información en formato JSON: brandName (Nombre de la marca), username (Handle/Username con @), followers (Número de seguidores como entero o string con K/M), industry (Industria/Sector inferido), contact (Email si aparece), phone (Número de teléfono si aparece), profileLink (Link al perfil si se puede inferir). RESPONDE SOLO EL JSON.";
 
-    // Priorizamos Gemini con reintentos
-    let text = "";
-    let lastErrorMessage = "";
-
-    console.log("[Analizando] Intentando con Gemini (Prioridad)");
-    try {
-      // Intento 1 con Gemini
-      text = await callGeminiDirect(image, mimeType, prompt);
-    } catch (err: any) {
-      console.warn("[Gemini] Falló intento 1, esperando 2 segundos...", err.message);
-      lastErrorMessage = err.message;
-      await delay(2000); // Esperar si hay saturación
-      try {
-        // Intento 2 con Gemini (vía SDK como respaldo)
-        const genAI = getGenAI();
-        if (genAI) {
+    const providers = [
+      { 
+        name: 'Gemini Primary (Direct)', 
+        key: 'GEMINI_API_KEY',
+        fn: () => callGeminiDirect(image, mimeType, prompt) 
+      },
+      { 
+        name: 'Gemini Retry (Wait Strategy)', 
+        key: 'GEMINI_API_KEY',
+        fn: async () => {
+          console.log("[Analizando] Aplicando estrategia de espera (2s)...");
+          await delay(2000);
+          const genAI = getGenAI();
+          if (!genAI) throw new Error("Gemini SDK no disponible");
           const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
           const result = await model.generateContent([
             { inlineData: { mimeType, data: image } },
             { text: prompt },
           ]);
-          text = (await result.response).text();
-        } else {
-          // Si no hay SDK, probamos REST otra vez
-          text = await callGeminiDirect(image, mimeType, prompt);
+          return (await result.response).text();
         }
-      } catch (err2: any) {
-        console.error("[Gemini] Falló totalmente:", err2.message);
-        lastErrorMessage = err2.message;
+      },
+      { 
+        name: 'NVIDIA Vision (Fallback)', 
+        key: 'NVIDIA_API_KEY',
+        fn: () => callNvidiaDirect(image, mimeType, prompt) 
+      },
+      { 
+        name: 'OpenRouter Gemini (Fallback)', 
+        key: 'OPENROUTER_API_KEY',
+        fn: () => callOpenRouterDirect(image, mimeType, prompt, 'google/gemini-flash-1.5') 
+      },
+      { 
+        name: 'OpenRouter GPT-4o (Fallback)', 
+        key: 'OPENROUTER_API_KEY',
+        fn: () => callOpenRouterDirect(image, mimeType, prompt, 'openai/gpt-4o-mini') 
+      }
+    ];
+
+    let lastError = "";
+    let diagnosticLog = [];
+
+    for (const provider of providers) {
+      const apiKey = process.env[provider.key];
+      if (!apiKey) {
+        diagnosticLog.push(`${provider.name}: Saltado (Falta API Key)`);
+        continue;
+      }
+
+      try {
+        console.log(`[Analizando] Intentando con: ${provider.name}`);
+        const text = await provider.fn();
+        if (text) {
+          const jsonData = extractJson(text);
+          console.log(`[Éxito] Analizado con: ${provider.name}`);
+          return res.json(jsonData);
+        }
+      } catch (err: any) {
+        lastError = err.message;
+        const shortError = err.message.substring(0, 50);
+        console.error(`[Fallo] ${provider.name}: ${shortError}`);
+        diagnosticLog.push(`${provider.name}: Error (${shortError})`);
+        
+        // Si el error es de créditos en OpenRouter, seguimos al siguiente
+        if (err.message.includes('credits')) continue;
+        
+        // Pequeña pausa entre diferentes proveedores para evitar saturación de red
+        await delay(300);
       }
     }
 
-    if (text) {
-      const jsonData = extractJson(text);
-      return res.json(jsonData);
-    }
-
-    // Fallback 1: NVIDIA
-    console.log("[Analizando] Probando Fallback: NVIDIA");
-    try {
-      text = await callNvidiaDirect(image, mimeType, prompt);
-      if (text) {
-        const jsonData = extractJson(text);
-        return res.json(jsonData);
-      }
-    } catch (err: any) {
-      console.error("[NVIDIA] Falló:", err.message);
-      lastErrorMessage = err.message;
-    }
-
-    // Fallback 2: OpenRouter
-    console.log("[Analizando] Probando Fallback: OpenRouter");
-    try {
-      text = await callOpenRouterDirect(image, mimeType, prompt, 'google/gemini-flash-1.5');
-      if (text) {
-        const jsonData = extractJson(text);
-        return res.json(jsonData);
-      }
-    } catch (err: any) {
-      console.error("[OpenRouter] Falló:", err.message);
-      lastErrorMessage = err.message;
-    }
-
-    throw new Error(`Análisis fallido. Último error: ${lastErrorMessage}`);
+    throw new Error(`Análisis fallido tras intentar con todos los proveedores. Último error: ${lastError}. Diagnóstico: ${diagnosticLog.join(' | ')}`);
   } catch (error: any) {
     console.error('Error in /api/analyze:', error);
     res.status(500).json({ error: error.message });
