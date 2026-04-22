@@ -13,6 +13,9 @@ const PORT = 3000;
 
 app.use(express.json({ limit: '10mb' }));
 
+// Helper for delay
+const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
 // Gemini Setup
 const getGenAI = () => {
   const apiKey = (process.env.GEMINI_API_KEY || '').trim().replace(/["']/g, '');
@@ -232,60 +235,79 @@ app.post('/api/analyze', async (req, res) => {
     const prompt = "Analiza esta captura de pantalla de un perfil de Instagram y extrae la siguiente información en formato JSON: brandName (Nombre de la marca), username (Handle/Username con @), followers (Número de seguidores como entero), industry (Industria/Sector inferido), contact (Email si aparece), phone (Número de teléfono si aparece), profileLink (Link al perfil si se puede inferir).";
 
     try {
-      // Intento 1: Google Gemini Principal (Versión estándar v1)
-      console.log('Intentando Gemini v1...');
-      const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
-      const result = await model.generateContent([
-        { inlineData: { mimeType, data: image } },
-        { text: prompt },
-      ]);
-      const response = await result.response;
-      const text = response.text();
-      return res.json(extractJson(text));
-    } catch (primaryError: any) {
-      console.error('Error en Gemini v1:', primaryError.message);
-      
-      // Cadena de fallbacks
-      const fallbacks = [
-        { type: 'google', name: "gemini-1.5-flash", version: 'v1beta' },
-        { type: 'google', name: "gemini-1.5-flash-latest", version: 'v1beta' },
-        { type: 'openrouter' },
-        { type: 'groq' },
-        { type: 'aiml' }
+      // Lista de intentos (Modelo + Proveedor)
+      const attempts = [
+        { type: 'google', model: 'gemini-1.5-flash', version: 'v1' },
+        { type: 'google', model: 'gemini-1.5-flash-latest', version: 'v1beta' },
+        { type: 'openrouter', model: 'google/gemini-flash-1.5' },
+        { type: 'openrouter', model: 'anthropic/claude-3-haiku' },
+        { type: 'openrouter', model: 'openai/gpt-4o-mini' }
       ];
 
-      for (const fb of fallbacks) {
+      for (let i = 0; i < attempts.length; i++) {
+        const attempt = attempts[i];
         try {
+          console.log(`[Attempt ${i + 1}] Trying ${attempt.type} with ${attempt.model}...`);
           let text = "";
-          if (fb.type === 'google') {
-            console.log(`Intentando fallback Google: ${fb.name} (${fb.version})`);
-            const fallbackModel = genAI.getGenerativeModel({ model: fb.name! }, { apiVersion: fb.version });
-            const result = await fallbackModel.generateContent([
+
+          if (attempt.type === 'google') {
+            const genAI = getGenAI();
+            if (!genAI) throw new Error("No Gemini API Key");
+            const model = genAI.getGenerativeModel({ model: attempt.model }, { apiVersion: attempt.version as any });
+            const result = await model.generateContent([
               { inlineData: { mimeType, data: image } },
               { text: prompt },
             ]);
             const response = await result.response;
             text = response.text();
-          } else if (fb.type === 'openrouter') {
-            const orResult = await callOpenRouter(image, mimeType, prompt);
-            if (orResult) text = orResult;
-          } else if (fb.type === 'groq') {
-            const groqResult = await callGroq(image, mimeType, prompt);
-            if (groqResult) text = groqResult;
-          } else if (fb.type === 'aiml') {
-            const aimlResult = await callAIML(image, mimeType, prompt);
-            if (aimlResult) text = aimlResult;
+          } else {
+            // OpenRouter fallback
+            const apiKey = (process.env.OPENROUTER_API_KEY || '').trim().replace(/["']/g, '');
+            if (!apiKey) throw new Error("No OpenRouter API Key");
+            
+            const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+              method: "POST",
+              headers: {
+                "Authorization": `Bearer ${apiKey}`,
+                "Content-Type": "application/json",
+                "HTTP-Referer": "https://huboo-prospector.vercel.app",
+                "X-Title": "Outbound Huboo Prospector"
+              },
+              body: JSON.stringify({
+                "model": attempt.model,
+                "messages": [
+                  {
+                    "role": "user",
+                    "content": [
+                      { "type": "text", "text": prompt },
+                      { "type": "image_url", "image_url": { "url": `data:${mimeType};base64,${image}` } }
+                    ]
+                  }
+                ]
+              })
+            });
+            const data: any = await response.json();
+            text = data.choices?.[0]?.message?.content || "";
           }
 
           if (text) {
-            return res.json(extractJson(text));
+            const jsonData = extractJson(text);
+            console.log(`[Success] Analysis completed with ${attempt.model}`);
+            return res.json(jsonData);
           }
-        } catch (e) {
-          console.warn(`Fallback ${fb.type} falló`);
+        } catch (err: any) {
+          console.error(`[Failed] Attempt ${i + 1} (${attempt.model}):`, err.message);
+          if (i < attempts.length - 1) {
+            console.log(`Waiting 2 seconds before next attempt...`);
+            await delay(2000); // 2 segundos de pausa entre intentos
+          }
         }
       }
 
-      throw new Error(`Error total: Todas las APIs (Gemini, OpenRouter, Groq, AIML) han fallado o devuelto un formato inválido. Por favor, revisa tus API Keys en Vercel.`);
+      throw new Error(`Estamos experimentando una alta demanda en los servidores de IA. Por favor, espera unos segundos e intenta subir la imagen de nuevo.`);
+    } catch (finalError: any) {
+      console.error('Final Analysis error:', finalError.message);
+      res.status(500).json({ error: finalError.message });
     }
   } catch (error: any) {
     console.error('Error in /api/analyze:', error);
