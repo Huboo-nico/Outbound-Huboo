@@ -61,9 +61,10 @@ export default function App() {
   const [totalARR, setTotalARR] = useState(0);
   const [totalProspects, setTotalProspects] = useState(0);
   const [isLoadingData, setIsLoadingData] = useState(true);
-  const [apiStatus, setApiStatus] = useState<{ gemini: boolean; nvidia: boolean; openrouter: boolean; sheets: boolean }>({
+  const [apiStatus, setApiStatus] = useState<{ gemini: boolean; nvidia: boolean; mistral: boolean; openrouter: boolean; sheets: boolean }>({
     gemini: false,
     nvidia: false,
+    mistral: false,
     openrouter: false,
     sheets: false
   });
@@ -257,6 +258,10 @@ export default function App() {
                 <div className="flex items-center gap-1">
                   <div className={`w-1.5 h-1.5 rounded-full ${apiStatus.nvidia ? 'bg-green-400 shadow-[0_0_5px_rgba(74,222,128,0.5)]' : 'bg-red-400'}`} title="Nvidia Status" />
                   <span className="text-[8px] opacity-50 uppercase font-bold">NVI</span>
+                </div>
+                <div className="flex items-center gap-1">
+                  <div className={`w-1.5 h-1.5 rounded-full ${apiStatus.mistral ? 'bg-green-400 shadow-[0_0_5px_rgba(74,222,128,0.5)]' : 'bg-red-400'}`} title="Mistral Status" />
+                  <span className="text-[8px] opacity-50 uppercase font-bold">MIS</span>
                 </div>
                 <div className="flex items-center gap-1">
                   <div className={`w-1.5 h-1.5 rounded-full ${apiStatus.openrouter ? 'bg-green-400 shadow-[0_0_5px_rgba(74,222,128,0.5)]' : 'bg-red-400'}`} title="OpenRouter Status" />

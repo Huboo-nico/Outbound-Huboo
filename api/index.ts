@@ -177,11 +177,42 @@ const callNvidiaDirect = async (image: string, mimeType: string, prompt: string)
   return data.choices?.[0]?.message?.content || "";
 };
 
+// Direct REST call to Mistral
+const callMistralDirect = async (image: string, mimeType: string, prompt: string) => {
+  const apiKey = (process.env.MISTRAL_API_KEY || '').trim().replace(/["']/g, '');
+  if (!apiKey) throw new Error("MISTRAL_API_KEY no configurada");
+
+  const response = await fetch("https://api.mistral.ai/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${apiKey}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      "model": "pixtral-12b-2409",
+      "messages": [
+        {
+          "role": "user",
+          "content": [
+            { "type": "text", "text": prompt },
+            { "type": "image_url", "image_url": `data:${mimeType};base64,${image}` }
+          ]
+        }
+      ]
+    })
+  });
+
+  const data: any = await response.json();
+  if (data.error) throw new Error(data.error.message || "Error en Mistral API");
+  return data.choices?.[0]?.message?.content || "";
+};
+
 // AI Models Health Check
 app.get('/api/health', async (req, res) => {
   const status = {
     gemini: !!process.env.GEMINI_API_KEY,
     nvidia: !!process.env.NVIDIA_API_KEY,
+    mistral: !!process.env.MISTRAL_API_KEY,
     openrouter: !!process.env.OPENROUTER_API_KEY,
     sheets: !!(process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL && process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY && process.env.GOOGLE_SHEETS_ID)
   };
@@ -222,6 +253,11 @@ app.post('/api/analyze', async (req, res) => {
         name: 'NVIDIA Vision (Fallback)', 
         key: 'NVIDIA_API_KEY',
         fn: () => callNvidiaDirect(image, mimeType, prompt) 
+      },
+      { 
+        name: 'Mistral Vision (Fallback)', 
+        key: 'MISTRAL_API_KEY',
+        fn: () => callMistralDirect(image, mimeType, prompt) 
       },
       { 
         name: 'OpenRouter Gemini (Fallback)', 
