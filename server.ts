@@ -29,18 +29,29 @@ const getGenAI = () => {
 // Robust JSON extraction from AI response
 const extractJson = (text: string) => {
   try {
+    // 1. Intentar limpiar bloques markdown
     const cleanJson = text.replace(/```json\n?|\n?```/g, '').trim();
+    // 2. Buscar el primer '{' y el último '}' para ignorar basura fuera del JSON
+    const firstBrace = cleanJson.indexOf('{');
+    const lastBrace = cleanJson.lastIndexOf('}');
+    
+    if (firstBrace !== -1 && lastBrace !== -1) {
+      const jsonCandidate = cleanJson.substring(firstBrace, lastBrace + 1);
+      return JSON.parse(jsonCandidate);
+    }
+    
     return JSON.parse(cleanJson);
   } catch (e) {
+    // Fallback con regex si falla el parse básico
     const match = text.match(/\{[\s\S]*\}|\[[\s\S]*\]/);
     if (match) {
       try {
         return JSON.parse(match[0]);
       } catch (e2) {
-        throw new Error("Respuesta de IA no procesable");
+        throw new Error(`Contenido mal formado: ${text.substring(0, 50)}...`);
       }
     }
-    throw new Error("Formato de respuesta inválido");
+    throw new Error("No se encontró un JSON válido en la respuesta");
   }
 };
 
@@ -49,7 +60,7 @@ const callGeminiDirect = async (image: string, mimeType: string, prompt: string)
   const apiKey = (process.env.GEMINI_API_KEY || '').trim().replace(/["']/g, '');
   if (!apiKey) throw new Error("GEMINI_API_KEY no configurada");
 
-  const url = `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
   
   const response = await fetch(url, {
     method: 'POST',
@@ -217,14 +228,14 @@ app.post('/api/analyze', async (req, res) => {
         fn: () => callNvidiaDirect(image, mimeType, prompt) 
       },
       { 
-        name: 'OpenRouter Gemini (Fallback Free)', 
+        name: 'OpenRouter Gemini (Fallback)', 
         key: 'OPENROUTER_API_KEY',
-        fn: () => callOpenRouterDirect(image, mimeType, prompt, 'google/gemini-flash-1.5:free') 
+        fn: () => callOpenRouterDirect(image, mimeType, prompt, 'google/gemini-flash-1.5') 
       },
       { 
-        name: 'OpenRouter Mistral (Fallback Free)', 
+        name: 'OpenRouter Llama Vision (Fallback)', 
         key: 'OPENROUTER_API_KEY',
-        fn: () => callOpenRouterDirect(image, mimeType, prompt, 'mistralai/pixtral-12b:free') 
+        fn: () => callOpenRouterDirect(image, mimeType, prompt, 'meta-llama/llama-3.2-11b-vision-instruct') 
       }
     ];
 
