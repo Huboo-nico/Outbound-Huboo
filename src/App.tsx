@@ -135,11 +135,40 @@ export default function App() {
     multiple: false
   } as any);
 
+  const parseFollowers = (val: string | number): number => {
+    if (!val) return 0;
+    let s = val.toString().toLowerCase().trim();
+    let multiplier = 1;
+    
+    if (s.endsWith('k')) {
+      multiplier = 1000;
+      s = s.slice(0, -1);
+    } else if (s.endsWith('m')) {
+      multiplier = 1000000;
+      s = s.slice(0, -1);
+    }
+    
+    s = s.replace(/[^0-9.,]/g, '');
+    
+    if (s.includes(',') && s.includes('.')) {
+      if (s.indexOf(',') > s.indexOf('.')) s = s.replace(/\./g, '').replace(',', '.');
+      else s = s.replace(/,/g, '');
+    } else if (s.includes(',')) {
+      const parts = s.split(',');
+      if (parts[parts.length - 1].length <= 2) s = s.replace(',', '.');
+      else s = s.replace(',', '');
+    }
+    
+    const num = parseFloat(s) || 0;
+    return Math.round(num * multiplier);
+  };
+
   const handleSave = async () => {
     if (!extractedData) return;
 
     setIsSaving(true);
-    const arr = extractedData.followers * FOLLOWERS_MULTIPLIER;
+    const followersNum = parseFollowers(extractedData.followers);
+    const arr = followersNum * FOLLOWERS_MULTIPLIER;
     
     try {
       const response = await fetch('/api/prospects', {

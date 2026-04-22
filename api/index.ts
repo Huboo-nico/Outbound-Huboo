@@ -224,49 +224,41 @@ app.post('/api/analyze', async (req, res) => {
       return res.status(500).json({ error: 'Configuración de IA incompleta (Falta API Key)' });
     }
 
-    // Usamos el alias más compatible con explicit apiVersion
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" }, { apiVersion: 'v1beta' });
-    
-    const prompt = "Analiza esta captura de pantalla de un perfil de Instagram y extrae la siguiente información en formato JSON: brandName (Nombre de la marca), username (Handle/Username con @), followers (Número de seguidores como entero), industry (Industria/Sector inferido), contact (Email si aparece), phone (Número de teléfono si aparece), profileLink (Link al perfil si se puede inferir).";
+    const prompt = "Analiza esta captura de pantalla de un perfil de Instagram y extrae la siguiente información en formato JSON: brandName (Nombre de la marca), username (Handle/Username con @), followers (Número de seguidores como entero o string con K/M), industry (Industria/Sector inferido), contact (Email si aparece), phone (Número de teléfono si aparece), profileLink (Link al perfil si se puede inferir).";
 
     try {
-      // Lista de intentos (Modelo + Proveedor)
+      // Priorizamos v1beta ya que es el más estable para este tipo de prompts
       const attempts = [
-        { type: 'google', model: 'gemini-1.5-flash', version: 'v1' },
+        { type: 'google', model: 'gemini-1.5-flash', version: 'v1beta' },
         { type: 'google', model: 'gemini-1.5-flash-latest', version: 'v1beta' },
         { type: 'openrouter', model: 'google/gemini-flash-1.5' },
-        { type: 'openrouter', model: 'anthropic/claude-3-haiku' },
         { type: 'openrouter', model: 'openai/gpt-4o-mini' }
       ];
 
       for (let i = 0; i < attempts.length; i++) {
         const attempt = attempts[i];
         try {
-          console.log(`[Attempt ${i + 1}] Trying ${attempt.type} with ${attempt.model}...`);
+          console.log(`[Analizando] Intento ${i + 1}: ${attempt.model} (${attempt.type})`);
           let text = "";
 
           if (attempt.type === 'google') {
             const genAI = getGenAI();
-            if (!genAI) throw new Error("No Gemini API Key");
+            if (!genAI) throw new Error("API Key de Gemini no configurada");
             const model = genAI.getGenerativeModel({ model: attempt.model }, { apiVersion: attempt.version as any });
             const result = await model.generateContent([
               { inlineData: { mimeType, data: image } },
               { text: prompt },
             ]);
-            const response = await result.response;
-            text = response.text();
+            text = (await result.response).text();
           } else {
-            // OpenRouter fallback
             const apiKey = (process.env.OPENROUTER_API_KEY || '').trim().replace(/["']/g, '');
-            if (!apiKey) throw new Error("No OpenRouter API Key");
+            if (!apiKey) throw new Error("API Key de OpenRouter no configurada");
             
             const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
               method: "POST",
               headers: {
                 "Authorization": `Bearer ${apiKey}`,
                 "Content-Type": "application/json",
-                "HTTP-Referer": "https://huboo-prospector.vercel.app",
-                "X-Title": "Outbound Huboo Prospector"
               },
               body: JSON.stringify({
                 "model": attempt.model,
@@ -287,21 +279,21 @@ app.post('/api/analyze', async (req, res) => {
 
           if (text) {
             const jsonData = extractJson(text);
-            console.log(`[Success] Analysis completed with ${attempt.model}`);
+            console.log(`[Éxito] Analizado con ${attempt.model}`);
             return res.json(jsonData);
           }
         } catch (err: any) {
-          console.error(`[Failed] Attempt ${i + 1} (${attempt.model}):`, err.message);
+          console.error(`[Error] Intento ${i + 1} (${attempt.model}):`, err.message);
+          // Delay mínimo para no agotar timeout de Vercel
           if (i < attempts.length - 1) {
-            console.log(`Waiting 2 seconds before next attempt...`);
-            await delay(2000); // 2 segundos de pausa entre intentos
+            await new Promise(r => setTimeout(r, 500));
           }
         }
       }
 
-      throw new Error(`Estamos experimentando una alta demanda en los servidores de IA. Por favor, espera unos segundos e intenta subir la imagen de nuevo.`);
+      throw new Error(`No hemos podido conectar con los servicios de IA tras varios intentos. Por favor, revisa tus API Keys en Vercel.`);
     } catch (finalError: any) {
-      console.error('Final Analysis error:', finalError.message);
+      console.error('Análisis fallido totalmente:', finalError.message);
       res.status(500).json({ error: finalError.message });
     }
   } catch (error: any) {
