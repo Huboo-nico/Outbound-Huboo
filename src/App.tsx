@@ -224,6 +224,15 @@ export default function App() {
   const calculateARR = (followers: number) => followers * FOLLOWERS_MULTIPLIER;
   const getCategory = (arr: number) => arr > HIGH_POTENTIAL_THRESHOLD ? 'High Potential' : 'Mid Market';
 
+  // Helper to safely render potentially complex values from AI
+  const safeRender = (val: any) => {
+    if (val === null || val === undefined) return 'N/A';
+    if (typeof val === 'object') {
+      return Object.values(val).filter(v => v !== null && v !== undefined).join(', ');
+    }
+    return val.toString();
+  };
+
   return (
     <div className="min-h-screen bg-bento-bg text-foreground font-sans selection:bg-huboo-blue/20">
       <Toaster position="top-right" richColors />
@@ -361,31 +370,31 @@ export default function App() {
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                     <div className="p-3 bg-slate-50 rounded-lg">
                       <div className="text-[10px] text-bento-text-muted uppercase font-bold">Marca</div>
-                      <div className="font-bold text-sm">{extractedData.brandName}</div>
+                      <div className="font-bold text-sm">{safeRender(extractedData.brandName)}</div>
                     </div>
                     <div className="p-3 bg-slate-50 rounded-lg">
                       <div className="text-[10px] text-bento-text-muted uppercase font-bold">Handle</div>
-                      <div className="font-bold text-sm text-bento-accent">{extractedData.username}</div>
+                      <div className="font-bold text-sm text-bento-accent">{safeRender(extractedData.username)}</div>
                     </div>
                     <div className="p-3 bg-slate-50 rounded-lg">
                       <div className="text-[10px] text-bento-text-muted uppercase font-bold">Seguidores</div>
-                      <div className="font-bold text-sm">{extractedData.followers.toLocaleString()}</div>
+                      <div className="font-bold text-sm">{safeRender(extractedData.followers)}</div>
                     </div>
                     <div className="p-3 bg-slate-50 rounded-lg">
                       <div className="text-[10px] text-bento-text-muted uppercase font-bold">Industria</div>
-                      <div className="font-bold text-sm">{extractedData.industry}</div>
+                      <div className="font-bold text-sm">{safeRender(extractedData.industry)}</div>
                     </div>
                     <div className="p-3 bg-slate-50 rounded-lg">
                       <div className="text-[10px] text-bento-text-muted uppercase font-bold">ARR Estimado</div>
-                      <div className="font-bold text-sm text-huboo-blue">{calculateARR(extractedData.followers).toLocaleString()}€</div>
+                      <div className="font-bold text-sm text-huboo-blue">{calculateARR(parseFollowers(extractedData.followers)).toLocaleString()}€</div>
                     </div>
                     <div className="p-3 bg-slate-50 rounded-lg">
                       <div className="text-[10px] text-bento-text-muted uppercase font-bold">Contacto</div>
-                      <div className="font-bold text-sm truncate">{extractedData.contact || 'N/A'}</div>
+                      <div className="font-bold text-sm truncate">{safeRender(extractedData.contact)}</div>
                     </div>
                     <div className="p-3 bg-slate-50 rounded-lg">
                       <div className="text-[10px] text-bento-text-muted uppercase font-bold">Teléfono</div>
-                      <div className="font-bold text-sm truncate">{extractedData.phone || 'N/A'}</div>
+                      <div className="font-bold text-sm truncate">{safeRender(extractedData.phone)}</div>
                     </div>
                   </div>
                   <div className="flex gap-3">

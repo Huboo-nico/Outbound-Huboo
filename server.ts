@@ -26,33 +26,50 @@ const getGenAI = () => {
   return new GoogleGenerativeAI(apiKey);
 };
 
-// Robust JSON extraction from AI response
+// Robust JSON extraction and flattening from AI response
 const extractJson = (text: string) => {
+  let parsed: any;
   try {
-    // 1. Intentar limpiar bloques markdown
     const cleanJson = text.replace(/```json\n?|\n?```/g, '').trim();
-    // 2. Buscar el primer '{' y el último '}' para ignorar basura fuera del JSON
     const firstBrace = cleanJson.indexOf('{');
     const lastBrace = cleanJson.lastIndexOf('}');
     
     if (firstBrace !== -1 && lastBrace !== -1) {
       const jsonCandidate = cleanJson.substring(firstBrace, lastBrace + 1);
-      return JSON.parse(jsonCandidate);
+      parsed = JSON.parse(jsonCandidate);
+    } else {
+      parsed = JSON.parse(cleanJson);
     }
-    
-    return JSON.parse(cleanJson);
   } catch (e) {
-    // Fallback con regex si falla el parse básico
     const match = text.match(/\{[\s\S]*\}|\[[\s\S]*\]/);
     if (match) {
       try {
-        return JSON.parse(match[0]);
+        parsed = JSON.parse(match[0]);
       } catch (e2) {
         throw new Error(`Contenido mal formado: ${text.substring(0, 50)}...`);
       }
+    } else {
+      throw new Error("No se encontró un JSON válido en la respuesta");
     }
-    throw new Error("No se encontró un JSON válido en la respuesta");
   }
+
+  // Flatten nested objects to strings to prevent React rendering errors
+  const flatten = (obj: any): any => {
+    if (obj === null || typeof obj !== 'object') return obj;
+    
+    const result: any = {};
+    for (const key in obj) {
+      if (typeof obj[key] === 'object' && obj[key] !== null) {
+        // If it's an object, stringify it or join its values
+        result[key] = Object.values(obj[key]).filter(v => v !== null && v !== undefined).join(', ');
+      } else {
+        result[key] = obj[key];
+      }
+    }
+    return result;
+  };
+
+  return flatten(parsed);
 };
 
 // Direct REST call to Gemini (More reliable in Serverless)
