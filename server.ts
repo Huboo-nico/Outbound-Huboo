@@ -73,6 +73,92 @@ const callOpenRouter = async (image: string, mimeType: string, prompt: string) =
   }
 };
 
+// Groq Fallback Helper
+const callGroq = async (image: string, mimeType: string, prompt: string) => {
+  const apiKey = (process.env.GROQ_API_KEY || '').trim().replace(/["']/g, '');
+  if (!apiKey) {
+    console.warn('GROQ_API_KEY is missing, skipping fallback');
+    return null;
+  }
+
+  try {
+    console.log('Intentando fallback con Groq...');
+    const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${apiKey}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        "model": "llama-3.2-11b-vision-preview",
+        "messages": [
+          {
+            "role": "user",
+            "content": [
+              { "type": "text", "text": prompt },
+              {
+                "type": "image_url",
+                "image_url": {
+                  "url": `data:${mimeType};base64,${image}`
+                }
+              }
+            ]
+          }
+        ]
+      })
+    });
+
+    const data: any = await response.json();
+    return data.choices?.[0]?.message?.content || null;
+  } catch (error) {
+    console.error('Groq Exception:', error);
+    return null;
+  }
+};
+
+// AI/ML API Fallback Helper
+const callAIML = async (image: string, mimeType: string, prompt: string) => {
+  const apiKey = (process.env.AIML_API_KEY || '').trim().replace(/["']/g, '');
+  if (!apiKey) {
+    console.warn('AIML_API_KEY is missing, skipping fallback');
+    return null;
+  }
+
+  try {
+    console.log('Intentando fallback con AI/ML API...');
+    const response = await fetch("https://api.aimlapi.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${apiKey}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        "model": "google/gemini-1.5-flash",
+        "messages": [
+          {
+            "role": "user",
+            "content": [
+              { "type": "text", "text": prompt },
+              {
+                "type": "image_url",
+                "image_url": {
+                  "url": `data:${mimeType};base64,${image}`
+                }
+              }
+            ]
+          }
+        ]
+      })
+    });
+
+    const data: any = await response.json();
+    return data.choices?.[0]?.message?.content || null;
+  } catch (error) {
+    console.error('AI/ML API Exception:', error);
+    return null;
+  }
+};
+
 // Google Sheets Setup
 const getSheetsClient = () => {
   const email = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
@@ -182,7 +268,21 @@ app.post('/api/analyze', async (req, res) => {
           return res.json(JSON.parse(cleanJson));
         }
 
-        throw new Error(`Error de modelo (404): No se encontró un modelo compatible en Google Cloud ni OpenRouter. Verifica tus API Keys.`);
+        // --- ÚLTIMA OPCIÓN: GROQ ---
+        const groqResult = await callGroq(image, mimeType, prompt);
+        if (groqResult) {
+          const cleanJson = groqResult.replace(/```json\n?|\n?```/g, '').trim();
+          return res.json(JSON.parse(cleanJson));
+        }
+
+        // --- ÚLTIMA OPCIÓN: AI/ML API ---
+        const aimlResult = await callAIML(image, mimeType, prompt);
+        if (aimlResult) {
+          const cleanJson = aimlResult.replace(/```json\n?|\n?```/g, '').trim();
+          return res.json(JSON.parse(cleanJson));
+        }
+
+        throw new Error(`Error de modelo (404): No se encontró un modelo compatible en Google Cloud, OpenRouter, Groq ni AI/ML API. Verifica tus API Keys.`);
       }
       
       if (apiError.message?.includes('429')) {
@@ -254,7 +354,12 @@ app.post('/api/prospects', async (req, res) => {
     }
 
     const { name, username, followers, sector, arr, contact, phone, link } = req.body;
-    console.log(`Intentando guardar prospecto: ${username} en la hoja: ${SPREADSHEET_ID}`);
+
+    // Calcular ARR usando la fórmula: Followers * 2.15
+    const parsedFollowers = parseInt(followers?.toString().replace(/[^0-9]/g, '') || '0');
+    const calculatedARR = (parsedFollowers * 2.15).toFixed(2) + '€';
+
+    console.log(`Intentando guardar prospecto: ${username} en la hoja. ARR Calculado: ${calculatedARR}`);
 
     // Check for duplicates
     const existing = await sheets.spreadsheets.values.get({
@@ -291,7 +396,7 @@ app.post('/api/prospects', async (req, res) => {
       range: RANGE,
       valueInputOption: 'USER_ENTERED',
       requestBody: {
-        values: [[date, name, username, followers, sector, arr, contact, phone, link]],
+        values: [[date, name, username, followers, sector, calculatedARR, contact, phone, link]],
       },
     });
 
