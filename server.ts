@@ -85,14 +85,21 @@ const callGeminiDirect = async (image: string, mimeType: string, prompt: string)
     body: JSON.stringify({
       contents: [{
         parts: [
-          { text: prompt },
+          { text: prompt + " (Nota: Si la imagen es clara/Light Mode, enfócate en el texto oscuro)" },
           { inlineData: { mimeType, data: image } }
         ]
       }]
     })
   });
 
-  const data: any = await response.json();
+  const rawText = await response.text();
+  let data: any;
+  try {
+    data = JSON.parse(rawText);
+  } catch (e) {
+    throw new Error(`Respuesta no-JSON de Gemini: ${rawText.substring(0, 100)}`);
+  }
+
   if (data.error) throw new Error(data.error.message || "Error en Gemini API");
   return data.candidates?.[0]?.content?.parts?.[0]?.text || "";
 };
@@ -124,8 +131,18 @@ const callOpenRouterDirect = async (image: string, mimeType: string, prompt: str
     })
   });
 
-  const data: any = await response.json();
-  if (data.error) throw new Error(data.error.message || "Error en OpenRouter");
+  const rawText = await response.text();
+  let data: any;
+  try {
+    data = JSON.parse(rawText);
+  } catch (e) {
+    throw new Error(`Respuesta no-JSON de OpenRouter: ${rawText.substring(0, 100)}`);
+  }
+
+  if (data.error) {
+    const msg = typeof data.error === 'string' ? data.error : (data.error.message || "Error en OpenRouter");
+    throw new Error(msg);
+  }
   return data.choices?.[0]?.message?.content || "";
 };
 
@@ -193,7 +210,14 @@ const callNvidiaDirect = async (image: string, mimeType: string, prompt: string)
     })
   });
 
-  const data: any = await response.json();
+  const rawText = await response.text();
+  let data: any;
+  try {
+    data = JSON.parse(rawText);
+  } catch (e) {
+    throw new Error(`Respuesta no-JSON de NVIDIA: ${rawText.substring(0, 100)}`);
+  }
+
   if (data.error) throw new Error(data.error.message || "Error en NVIDIA API");
   return data.choices?.[0]?.message?.content || "";
 };
@@ -223,7 +247,14 @@ const callMistralDirect = async (image: string, mimeType: string, prompt: string
     })
   });
 
-  const data: any = await response.json();
+  const rawText = await response.text();
+  let data: any;
+  try {
+    data = JSON.parse(rawText);
+  } catch (e) {
+    throw new Error(`Respuesta no-JSON de Mistral: ${rawText.substring(0, 100)}`);
+  }
+
   if (data.error) throw new Error(data.error.message || "Error en Mistral API");
   return data.choices?.[0]?.message?.content || "";
 };
