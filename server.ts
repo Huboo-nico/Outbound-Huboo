@@ -216,80 +216,64 @@ app.post('/api/analyze', async (req, res) => {
     const prompt = "Analiza esta captura de pantalla de un perfil de Instagram y extrae la siguiente información en formato JSON: brandName (Nombre de la marca), username (Handle/Username con @), followers (Número de seguidores como entero), industry (Industria/Sector inferido), contact (Email si aparece), phone (Número de teléfono si aparece), profileLink (Link al perfil si se puede inferir).";
 
     try {
+      // Intento 1: Google Gemini Principal (v1beta por compatibilidad)
+      const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" }, { apiVersion: 'v1beta' });
       const result = await model.generateContent([
-        {
-          inlineData: {
-            mimeType: mimeType,
-            data: image,
-          },
-        },
+        { inlineData: { mimeType, data: image } },
         { text: prompt },
       ]);
-
       const response = await result.response;
       const text = response.text();
-      
       const cleanJson = text.replace(/```json\n?|\n?```/g, '').trim();
-      res.json(JSON.parse(cleanJson));
-    } catch (apiError: any) {
-      console.error('Gemini API Error:', apiError);
+      return res.json(JSON.parse(cleanJson));
+    } catch (primaryError: any) {
+      console.error('Iniciando cadena de fallbacks por error en Gemini principal:', primaryError.message);
       
-      // Si falla, intentamos con varios fallbacks y versiones
-      if (apiError.message?.includes('404') || apiError.message?.includes('not found')) {
-        const fallbacks = [
-          { name: "gemini-1.5-flash-latest", version: 'v1beta' },
-          { name: "gemini-flash-latest", version: 'v1beta' },
-          { name: "gemini-1.5-flash", version: 'v1' },
-          { name: "gemini-1.5-pro", version: 'v1beta' }
-        ];
-        
-        for (const fb of fallbacks) {
-          try {
-            console.log(`Intentando fallback: ${fb.name} (${fb.version})`);
-            const fallbackModel = genAI.getGenerativeModel({ model: fb.name }, { apiVersion: fb.version });
-            const result = await fallbackModel.generateContent([
-              { inlineData: { mimeType, data: image } },
-              { text: prompt },
-            ]);
-            const response = await result.response;
-            const text = response.text();
-            const cleanJson = text.replace(/```json\n?|\n?```/g, '').trim();
-            return res.json(JSON.parse(cleanJson));
-          } catch (e) {
-            console.warn(`Fallback to ${fb.name} failed:`, e);
-            continue;
-          }
-        }
+      // Fallback 1: Otras versiones de Google
+      const googleFallbacks = [
+        { name: "gemini-1.5-flash-latest", version: 'v1beta' },
+        { name: "gemini-1.5-flash", version: 'v1' },
+      ];
 
-        // --- ÚLTIMA OPCIÓN: OPENROUTER ---
-        const orResult = await callOpenRouter(image, mimeType, prompt);
-        if (orResult) {
-          const cleanJson = orResult.replace(/```json\n?|\n?```/g, '').trim();
+      for (const fb of googleFallbacks) {
+        try {
+          console.log(`Intentando fallback Google: ${fb.name}`);
+          const fallbackModel = genAI.getGenerativeModel({ model: fb.name }, { apiVersion: fb.version });
+          const result = await fallbackModel.generateContent([
+            { inlineData: { mimeType, data: image } },
+            { text: prompt },
+          ]);
+          const response = await result.response;
+          const text = response.text();
+          const cleanJson = text.replace(/```json\n?|\n?```/g, '').trim();
           return res.json(JSON.parse(cleanJson));
+        } catch (e) {
+          console.warn(`Fallback Google ${fb.name} falló`);
         }
-
-        // --- ÚLTIMA OPCIÓN: GROQ ---
-        const groqResult = await callGroq(image, mimeType, prompt);
-        if (groqResult) {
-          const cleanJson = groqResult.replace(/```json\n?|\n?```/g, '').trim();
-          return res.json(JSON.parse(cleanJson));
-        }
-
-        // --- ÚLTIMA OPCIÓN: AI/ML API ---
-        const aimlResult = await callAIML(image, mimeType, prompt);
-        if (aimlResult) {
-          const cleanJson = aimlResult.replace(/```json\n?|\n?```/g, '').trim();
-          return res.json(JSON.parse(cleanJson));
-        }
-
-        throw new Error(`Error de modelo (404): No se encontró un modelo compatible en Google Cloud, OpenRouter, Groq ni AI/ML API. Verifica tus API Keys.`);
       }
-      
-      if (apiError.message?.includes('429')) {
-        throw new Error('Límite de cuota excedido. Por favor, espera un minuto antes de intentar de nuevo.');
+
+      // Fallback 2: OpenRouter
+      const orResult = await callOpenRouter(image, mimeType, prompt);
+      if (orResult) {
+        const cleanJson = orResult.replace(/```json\n?|\n?```/g, '').trim();
+        return res.json(JSON.parse(cleanJson));
       }
-      
-      throw apiError;
+
+      // Fallback 3: Groq
+      const groqResult = await callGroq(image, mimeType, prompt);
+      if (groqResult) {
+        const cleanJson = groqResult.replace(/```json\n?|\n?```/g, '').trim();
+        return res.json(JSON.parse(cleanJson));
+      }
+
+      // Fallback 4: AI/ML API
+      const aimlResult = await callAIML(image, mimeType, prompt);
+      if (aimlResult) {
+        const cleanJson = aimlResult.replace(/```json\n?|\n?```/g, '').trim();
+        return res.json(JSON.parse(cleanJson));
+      }
+
+      throw new Error(`Error crítico: Todas las APIs de IA fallaron. Verifica tus API Keys en Vercel.`);
     }
   } catch (error: any) {
     console.error('Error in /api/analyze:', error);
