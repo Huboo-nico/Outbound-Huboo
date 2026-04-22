@@ -73,8 +73,8 @@ const callGeminiDirect = async (image: string, mimeType: string, prompt: string)
   const apiKey = (process.env.GEMINI_API_KEY || '').trim().replace(/["']/g, '');
   if (!apiKey) throw new Error("GEMINI_API_KEY no configurada");
 
-  // Endpoint v1beta es más estable para modelos Flash en algunas regiones Free
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+  // Probamos v1 con gemini-1.5-flash-latest que es el puntero más estable
+  const url = `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash-latest:generateContent?key=${apiKey}`;
   
   const response = await fetch(url, {
     method: 'POST',
@@ -94,10 +94,25 @@ const callGeminiDirect = async (image: string, mimeType: string, prompt: string)
   try {
     data = JSON.parse(rawText);
   } catch (e) {
-    throw new Error(`Respuesta no-JSON de Gemini: ${rawText.substring(0, 100)}`);
+    throw new Error(`Respuesta No-JSON (HTTP ${response.status}): ${rawText.substring(0, 50)}`);
   }
 
-  if (data.error) throw new Error(data.error.message || "Error en Gemini API");
+  if (data.error) {
+    // Si falla v1, intentamos v1beta como último recurso de fallback interno
+    if (data.error.message.includes('not found')) {
+      const urlBeta = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+      const respBeta = await fetch(urlBeta, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }, { inlineData: { mimeType, data: image } }] }]
+        })
+      });
+      const dataBeta = await respBeta.json();
+      if (dataBeta.candidates?.[0]?.content?.parts?.[0]?.text) return dataBeta.candidates[0].content.parts[0].text;
+    }
+    throw new Error(data.error.message || "Error en Gemini API");
+  }
   return data.candidates?.[0]?.content?.parts?.[0]?.text || "";
 };
 
@@ -186,6 +201,7 @@ const callNvidiaDirect = async (image: string, mimeType: string, prompt: string)
   const apiKey = (process.env.NVIDIA_API_KEY || '').trim().replace(/["']/g, '');
   if (!apiKey) throw new Error("NVIDIA_API_KEY no configurada");
 
+  // Cambiamos a la URL de NVIDIA NIM más compatible y el modelo meta/
   const response = await fetch("https://integrate.api.nvidia.com/v1/chat/completions", {
     method: "POST",
     headers: {
@@ -193,7 +209,7 @@ const callNvidiaDirect = async (image: string, mimeType: string, prompt: string)
       "Content-Type": "application/json"
     },
     body: JSON.stringify({
-      "model": "nvidia/llama-3.2-11b-vision-instruct",
+      "model": "meta/llama-3.2-11b-vision-instruct",
       "messages": [
         {
           "role": "user",
@@ -212,7 +228,7 @@ const callNvidiaDirect = async (image: string, mimeType: string, prompt: string)
   try {
     data = JSON.parse(rawText);
   } catch (e) {
-    throw new Error(`Respuesta no-JSON de NVIDIA: ${rawText.substring(0, 100)}`);
+    throw new Error(`Respuesta no-JSON de NVIDIA (HTTP ${response.status})`);
   }
 
   if (data.error) throw new Error(data.error.message || "Error en NVIDIA API");
@@ -309,14 +325,14 @@ app.post('/api/analyze', async (req, res) => {
         fn: () => callMistralDirect(image, mimeType, prompt) 
       },
       { 
-        name: 'OpenRouter Gemini (Fallback)', 
+        name: 'OpenRouter Gemini (Fallback Free)', 
         key: 'OPENROUTER_API_KEY',
-        fn: () => callOpenRouterDirect(image, mimeType, prompt, 'google/gemini-flash-1.5') 
+        fn: () => callOpenRouterDirect(image, mimeType, prompt, 'google/gemini-flash-1.5:free') 
       },
       { 
-        name: 'OpenRouter Llama Vision (Fallback)', 
+        name: 'OpenRouter Qwen (Fallback Free)', 
         key: 'OPENROUTER_API_KEY',
-        fn: () => callOpenRouterDirect(image, mimeType, prompt, 'meta-llama/llama-3.2-11b-vision-instruct') 
+        fn: () => callOpenRouterDirect(image, mimeType, prompt, 'qwen/qwen-2-vl-72b-instruct:free') 
       }
     ];
 
