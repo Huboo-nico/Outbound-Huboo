@@ -139,10 +139,42 @@ const getSpreadsheetId = () => {
 const SPREADSHEET_ID = getSpreadsheetId();
 const RANGE = 'Sheet1!A:I';
 
+// Direct REST call to NVIDIA
+const callNvidiaDirect = async (image: string, mimeType: string, prompt: string) => {
+  const apiKey = (process.env.NVIDIA_API_KEY || '').trim().replace(/["']/g, '');
+  if (!apiKey) throw new Error("NVIDIA_API_KEY no configurada");
+
+  const response = await fetch("https://integrate.api.nvidia.com/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${apiKey}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      "model": "nvidia/llama-3.2-11b-vision-instruct",
+      "messages": [
+        {
+          "role": "user",
+          "content": [
+            { "type": "text", "text": prompt },
+            { "type": "image_url", "image_url": { "url": `data:${mimeType};base64,${image}` } }
+          ]
+        }
+      ],
+      "max_tokens": 1024
+    })
+  });
+
+  const data: any = await response.json();
+  if (data.error) throw new Error(data.error.message || "Error en NVIDIA API");
+  return data.choices?.[0]?.message?.content || "";
+};
+
 // AI Models Health Check
 app.get('/api/health', async (req, res) => {
   const status = {
     gemini: !!process.env.GEMINI_API_KEY,
+    nvidia: !!process.env.NVIDIA_API_KEY,
     openrouter: !!process.env.OPENROUTER_API_KEY,
     sheets: !!(process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL && process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY && process.env.GOOGLE_SHEETS_ID)
   };
@@ -157,51 +189,70 @@ app.post('/api/analyze', async (req, res) => {
 
     const prompt = "Analiza esta captura de pantalla de un perfil de Instagram y extrae la siguiente información en formato JSON: brandName (Nombre de la marca), username (Handle/Username con @), followers (Número de seguidores como entero o string con K/M), industry (Industria/Sector inferido), contact (Email si aparece), phone (Número de teléfono si aparece), profileLink (Link al perfil si se puede inferir). RESPONDE SOLO EL JSON.";
 
-    const attempts = [
-      { name: 'Gemini (Directo)', type: 'google' },
-      { name: 'OpenRouter (Gemini)', type: 'openrouter', model: 'google/gemini-flash-1.5' },
-      { name: 'OpenRouter (GPT-4o)', type: 'openrouter', model: 'openai/gpt-4o-mini' }
-    ];
-
+    // Priorizamos Gemini con reintentos
+    let text = "";
     let lastErrorMessage = "";
 
-    for (let i = 0; i < attempts.length; i++) {
-      const attempt = attempts[i];
+    console.log("[Analizando] Intentando con Gemini (Prioridad)");
+    try {
+      // Intento 1 con Gemini
+      text = await callGeminiDirect(image, mimeType, prompt);
+    } catch (err: any) {
+      console.warn("[Gemini] Falló intento 1, esperando 2 segundos...", err.message);
+      lastErrorMessage = err.message;
+      await delay(2000); // Esperar si hay saturación
       try {
-        console.log(`[Analizando] Intento ${i + 1}: ${attempt.name}`);
-        let text = "";
-
-        if (attempt.type === 'google') {
-          try {
-            text = await callGeminiDirect(image, mimeType, prompt);
-          } catch (restErr) {
-            console.warn("REST falló, probando SDK...");
-            const genAI = getGenAI();
-            if (!genAI) throw restErr;
-            const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
-            const result = await model.generateContent([
-              { inlineData: { mimeType, data: image } },
-              { text: prompt },
-            ]);
-            text = (await result.response).text();
-          }
+        // Intento 2 con Gemini (vía SDK como respaldo)
+        const genAI = getGenAI();
+        if (genAI) {
+          const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+          const result = await model.generateContent([
+            { inlineData: { mimeType, data: image } },
+            { text: prompt },
+          ]);
+          text = (await result.response).text();
         } else {
-          text = await callOpenRouterDirect(image, mimeType, prompt, attempt.model!);
+          // Si no hay SDK, probamos REST otra vez
+          text = await callGeminiDirect(image, mimeType, prompt);
         }
-
-        if (text) {
-          const jsonData = extractJson(text);
-          console.log(`[Éxito] Analizado con ${attempt.name}`);
-          return res.json(jsonData);
-        }
-      } catch (err: any) {
-        console.error(`[Error] Intento ${i + 1} (${attempt.name}) falló:`, err.message);
-        lastErrorMessage = err.message;
-        if (i < attempts.length - 1) await new Promise(r => setTimeout(r, 500));
+      } catch (err2: any) {
+        console.error("[Gemini] Falló totalmente:", err2.message);
+        lastErrorMessage = err2.message;
       }
     }
 
-    throw new Error(`Error en el análisis tras varios intentos. Último error: ${lastErrorMessage}. Verifica tus API Keys en Vercel.`);
+    if (text) {
+      const jsonData = extractJson(text);
+      return res.json(jsonData);
+    }
+
+    // Fallback 1: NVIDIA
+    console.log("[Analizando] Probando Fallback: NVIDIA");
+    try {
+      text = await callNvidiaDirect(image, mimeType, prompt);
+      if (text) {
+        const jsonData = extractJson(text);
+        return res.json(jsonData);
+      }
+    } catch (err: any) {
+      console.error("[NVIDIA] Falló:", err.message);
+      lastErrorMessage = err.message;
+    }
+
+    // Fallback 2: OpenRouter
+    console.log("[Analizando] Probando Fallback: OpenRouter");
+    try {
+      text = await callOpenRouterDirect(image, mimeType, prompt, 'google/gemini-flash-1.5');
+      if (text) {
+        const jsonData = extractJson(text);
+        return res.json(jsonData);
+      }
+    } catch (err: any) {
+      console.error("[OpenRouter] Falló:", err.message);
+      lastErrorMessage = err.message;
+    }
+
+    throw new Error(`Análisis fallido. Último error: ${lastErrorMessage}`);
   } catch (error: any) {
     console.error('Error in /api/analyze:', error);
     res.status(500).json({ error: error.message });

@@ -61,8 +61,9 @@ export default function App() {
   const [totalARR, setTotalARR] = useState(0);
   const [totalProspects, setTotalProspects] = useState(0);
   const [isLoadingData, setIsLoadingData] = useState(true);
-  const [apiStatus, setApiStatus] = useState<{ gemini: boolean; openrouter: boolean; sheets: boolean }>({
+  const [apiStatus, setApiStatus] = useState<{ gemini: boolean; nvidia: boolean; openrouter: boolean; sheets: boolean }>({
     gemini: false,
+    nvidia: false,
     openrouter: false,
     sheets: false
   });
@@ -254,6 +255,10 @@ export default function App() {
                   <span className="text-[8px] opacity-50 uppercase font-bold">GEM</span>
                 </div>
                 <div className="flex items-center gap-1">
+                  <div className={`w-1.5 h-1.5 rounded-full ${apiStatus.nvidia ? 'bg-green-400 shadow-[0_0_5px_rgba(74,222,128,0.5)]' : 'bg-red-400'}`} title="Nvidia Status" />
+                  <span className="text-[8px] opacity-50 uppercase font-bold">NVI</span>
+                </div>
+                <div className="flex items-center gap-1">
                   <div className={`w-1.5 h-1.5 rounded-full ${apiStatus.openrouter ? 'bg-green-400 shadow-[0_0_5px_rgba(74,222,128,0.5)]' : 'bg-red-400'}`} title="OpenRouter Status" />
                   <span className="text-[8px] opacity-50 uppercase font-bold">OR</span>
                 </div>
@@ -307,9 +312,12 @@ export default function App() {
               <p className="text-[10px] text-bento-text-muted mt-1">PNG, JPG o JPEG (Perfil/Bio)</p>
             </div>
             {isAnalyzing && (
-              <div className="mt-4 flex items-center gap-2 text-xs text-bento-accent font-medium">
-                <Loader2 className="animate-spin" size={14} />
-                Analizando con Gemini AI...
+              <div className="mt-4 flex flex-col items-center gap-1.5 text-xs text-bento-accent font-medium">
+                <div className="flex items-center gap-2">
+                  <Loader2 className="animate-spin" size={14} />
+                  Analizando con Gemini (Prioridad)
+                </div>
+                <p className="text-[9px] opacity-60 text-center">Esperando respuesta de IA... Reintentando si es necesario.</p>
               </div>
             )}
           </Card>
