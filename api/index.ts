@@ -25,152 +25,76 @@ const getGenAI = () => {
 // Robust JSON extraction from AI response
 const extractJson = (text: string) => {
   try {
-    // Intento 1: Limpieza de markdown blocks
     const cleanJson = text.replace(/```json\n?|\n?```/g, '').trim();
     return JSON.parse(cleanJson);
   } catch (e) {
-    // Intento 2: Buscar bloques { ... } o [ ... ]
     const match = text.match(/\{[\s\S]*\}|\[[\s\S]*\]/);
     if (match) {
       try {
         return JSON.parse(match[0]);
       } catch (e2) {
-        throw new Error("No se pudo extraer JSON válido de la respuesta de la IA");
+        throw new Error("Respuesta de IA no procesable");
       }
     }
-    throw new Error("La IA no devolvió un formato JSON válido");
+    throw new Error("Formato de respuesta inválido");
   }
 };
 
-// OpenRouter Fallback Helper
-const callOpenRouter = async (image: string, mimeType: string, prompt: string) => {
+// Direct REST call to Gemini (More reliable in Serverless)
+const callGeminiDirect = async (image: string, mimeType: string, prompt: string) => {
+  const apiKey = (process.env.GEMINI_API_KEY || '').trim().replace(/["']/g, '');
+  if (!apiKey) throw new Error("GEMINI_API_KEY no configurada");
+
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+  
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      contents: [{
+        parts: [
+          { text: prompt },
+          { inlineData: { mimeType, data: image } }
+        ]
+      }]
+    })
+  });
+
+  const data: any = await response.json();
+  if (data.error) throw new Error(data.error.message || "Error en Gemini API");
+  return data.candidates?.[0]?.content?.parts?.[0]?.text || "";
+};
+
+// Direct REST call to OpenRouter
+const callOpenRouterDirect = async (image: string, mimeType: string, prompt: string, model: string) => {
   const apiKey = (process.env.OPENROUTER_API_KEY || '').trim().replace(/["']/g, '');
-  if (!apiKey) {
-    console.warn('OPENROUTER_API_KEY is missing, skipping fallback');
-    return null;
-  }
+  if (!apiKey) throw new Error("OPENROUTER_API_KEY no configurada");
 
-  try {
-    console.log('Intentando fallback con OpenRouter...');
-    const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-        "HTTP-Referer": process.env.APP_URL || "https://huboo-prospector.vercel.app",
-        "X-Title": "Outbound Huboo Prospector"
-      },
-      body: JSON.stringify({
-        "model": "google/gemini-flash-1.5",
-        "messages": [
-          {
-            "role": "user",
-            "content": [
-              { "type": "text", "text": prompt },
-              {
-                "type": "image_url",
-                "image_url": {
-                  "url": `data:${mimeType};base64,${image}`
-                }
-              }
-            ]
-          }
-        ]
-      })
-    });
+  const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+      "HTTP-Referer": "https://huboo-prospector.vercel.app",
+      "X-Title": "Outbound Huboo Prospector"
+    },
+    body: JSON.stringify({
+      "model": model,
+      "messages": [
+        {
+          "role": "user",
+          "content": [
+            { "type": "text", "text": prompt },
+            { "type": "image_url", "image_url": { "url": `data:${mimeType};base64,${image}` } }
+          ]
+        }
+      ]
+    })
+  });
 
-    const data: any = await response.json();
-    return data.choices?.[0]?.message?.content || null;
-  } catch (error) {
-    console.error('OpenRouter Exception:', error);
-    return null;
-  }
-};
-
-// Groq Fallback Helper
-const callGroq = async (image: string, mimeType: string, prompt: string) => {
-  const apiKey = (process.env.GROQ_API_KEY || '').trim().replace(/["']/g, '');
-  if (!apiKey) {
-    console.warn('GROQ_API_KEY is missing, skipping fallback');
-    return null;
-  }
-
-  try {
-    console.log('Intentando fallback con Groq...');
-    const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${apiKey}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        "model": "llama-3.2-11b-vision-preview",
-        "messages": [
-          {
-            "role": "user",
-            "content": [
-              { "type": "text", "text": prompt },
-              {
-                "type": "image_url",
-                "image_url": {
-                  "url": `data:${mimeType};base64,${image}`
-                }
-              }
-            ]
-          }
-        ]
-      })
-    });
-
-    const data: any = await response.json();
-    return data.choices?.[0]?.message?.content || null;
-  } catch (error) {
-    console.error('Groq Exception:', error);
-    return null;
-  }
-};
-
-// AI/ML API Fallback Helper
-const callAIML = async (image: string, mimeType: string, prompt: string) => {
-  const apiKey = (process.env.AIML_API_KEY || '').trim().replace(/["']/g, '');
-  if (!apiKey) {
-    console.warn('AIML_API_KEY is missing, skipping fallback');
-    return null;
-  }
-
-  try {
-    console.log('Intentando fallback con AI/ML API...');
-    const response = await fetch("https://api.aimlapi.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${apiKey}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        "model": "google/gemini-1.5-flash",
-        "messages": [
-          {
-            "role": "user",
-            "content": [
-              { "type": "text", "text": prompt },
-              {
-                "type": "image_url",
-                "image_url": {
-                  "url": `data:${mimeType};base64,${image}`
-                }
-              }
-            ]
-          }
-        ]
-      })
-    });
-
-    const data: any = await response.json();
-    return data.choices?.[0]?.message?.content || null;
-  } catch (error) {
-    console.error('AI/ML API Exception:', error);
-    return null;
-  }
+  const data: any = await response.json();
+  if (data.error) throw new Error(data.error.message || "Error en OpenRouter");
+  return data.choices?.[0]?.message?.content || "";
 };
 
 // Google Sheets Setup
@@ -215,87 +139,40 @@ const RANGE = 'Sheet1!A:I';
 app.post('/api/analyze', async (req, res) => {
   try {
     const { image, mimeType } = req.body;
-    if (!image || !mimeType) {
-      return res.status(400).json({ error: 'Imagen y tipo MIME son requeridos' });
-    }
-
-    const genAI = getGenAI();
-    if (!genAI) {
-      return res.status(500).json({ error: 'Configuración de IA incompleta (Falta API Key)' });
-    }
+    if (!image || !mimeType) return res.status(400).json({ error: 'Imagen requerida' });
 
     const prompt = "Analiza esta captura de pantalla de un perfil de Instagram y extrae la siguiente información en formato JSON: brandName (Nombre de la marca), username (Handle/Username con @), followers (Número de seguidores como entero o string con K/M), industry (Industria/Sector inferido), contact (Email si aparece), phone (Número de teléfono si aparece), profileLink (Link al perfil si se puede inferir).";
 
-    try {
-      // Priorizamos v1beta ya que es el más estable para este tipo de prompts
-      const attempts = [
-        { type: 'google', model: 'gemini-1.5-flash', version: 'v1beta' },
-        { type: 'google', model: 'gemini-1.5-flash-latest', version: 'v1beta' },
-        { type: 'openrouter', model: 'google/gemini-flash-1.5' },
-        { type: 'openrouter', model: 'openai/gpt-4o-mini' }
-      ];
+    const attempts = [
+      { type: 'google' },
+      { type: 'openrouter', model: 'google/gemini-flash-1.5' },
+      { type: 'openrouter', model: 'openai/gpt-4o-mini' }
+    ];
 
-      for (let i = 0; i < attempts.length; i++) {
-        const attempt = attempts[i];
-        try {
-          console.log(`[Analizando] Intento ${i + 1}: ${attempt.model} (${attempt.type})`);
-          let text = "";
+    for (let i = 0; i < attempts.length; i++) {
+      const attempt = attempts[i];
+      try {
+        console.log(`[Analizando] Intento ${i + 1}: ${attempt.type}`);
+        let text = "";
 
-          if (attempt.type === 'google') {
-            const genAI = getGenAI();
-            if (!genAI) throw new Error("API Key de Gemini no configurada");
-            const model = genAI.getGenerativeModel({ model: attempt.model }, { apiVersion: attempt.version as any });
-            const result = await model.generateContent([
-              { inlineData: { mimeType, data: image } },
-              { text: prompt },
-            ]);
-            text = (await result.response).text();
-          } else {
-            const apiKey = (process.env.OPENROUTER_API_KEY || '').trim().replace(/["']/g, '');
-            if (!apiKey) throw new Error("API Key de OpenRouter no configurada");
-            
-            const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-              method: "POST",
-              headers: {
-                "Authorization": `Bearer ${apiKey}`,
-                "Content-Type": "application/json",
-              },
-              body: JSON.stringify({
-                "model": attempt.model,
-                "messages": [
-                  {
-                    "role": "user",
-                    "content": [
-                      { "type": "text", "text": prompt },
-                      { "type": "image_url", "image_url": { "url": `data:${mimeType};base64,${image}` } }
-                    ]
-                  }
-                ]
-              })
-            });
-            const data: any = await response.json();
-            text = data.choices?.[0]?.message?.content || "";
-          }
-
-          if (text) {
-            const jsonData = extractJson(text);
-            console.log(`[Éxito] Analizado con ${attempt.model}`);
-            return res.json(jsonData);
-          }
-        } catch (err: any) {
-          console.error(`[Error] Intento ${i + 1} (${attempt.model}):`, err.message);
-          // Delay mínimo para no agotar timeout de Vercel
-          if (i < attempts.length - 1) {
-            await new Promise(r => setTimeout(r, 500));
-          }
+        if (attempt.type === 'google') {
+          text = await callGeminiDirect(image, mimeType, prompt);
+        } else {
+          text = await callOpenRouterDirect(image, mimeType, prompt, attempt.model!);
         }
-      }
 
-      throw new Error(`No hemos podido conectar con los servicios de IA tras varios intentos. Por favor, revisa tus API Keys en Vercel.`);
-    } catch (finalError: any) {
-      console.error('Análisis fallido totalmente:', finalError.message);
-      res.status(500).json({ error: finalError.message });
+        if (text) {
+          const jsonData = extractJson(text);
+          console.log(`[Éxito] Analizado con ${attempt.type}`);
+          return res.json(jsonData);
+        }
+      } catch (err: any) {
+        console.error(`[Error] Intento ${i + 1} falló:`, err.message);
+        if (i < attempts.length - 1) await new Promise(r => setTimeout(r, 400));
+      }
     }
+
+    throw new Error("No ha sido posible conectar con la IA. Por favor, revisa tus API Keys en Vercel.");
   } catch (error: any) {
     console.error('Error in /api/analyze:', error);
     res.status(500).json({ error: error.message });
