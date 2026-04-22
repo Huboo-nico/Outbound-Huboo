@@ -159,28 +159,47 @@ export default function App() {
     if (!val) return 0;
     let s = val.toString().toLowerCase().trim();
     let multiplier = 1;
-    
-    if (s.endsWith('k')) {
+
+    // Handle Spanish and English suffixes
+    if (s.includes('mil') || s.endsWith('k')) {
       multiplier = 1000;
-      s = s.slice(0, -1);
-    } else if (s.endsWith('m')) {
+      s = s.replace('mil', '').replace('k', '').trim();
+    } else if (s.includes('millón') || s.includes('millon') || s.endsWith('m')) {
       multiplier = 1000000;
-      s = s.slice(0, -1);
+      s = s.replace('millones', '').replace('millón', '').replace('millon', '').replace('m', '').trim();
     }
-    
+
+    // Clean up thousand separators and normalize decimal point
     s = s.replace(/[^0-9.,]/g, '');
-    
+
     if (s.includes(',') && s.includes('.')) {
-      if (s.indexOf(',') > s.indexOf('.')) s = s.replace(/\./g, '').replace(',', '.');
-      else s = s.replace(/,/g, '');
+      // European style: 1.234,56 -> 1234.56
+      if (s.indexOf('.') < s.indexOf(',')) {
+        s = s.replace(/\./g, '').replace(',', '.');
+      } else {
+        // American style: 1,234.56 -> 1234.56
+        s = s.replace(/,/g, '');
+      }
     } else if (s.includes(',')) {
+      // Single separator ",": 10,7 (decimal) or 10,000 (thousands)
       const parts = s.split(',');
-      if (parts[parts.length - 1].length <= 2) s = s.replace(',', '.');
-      else s = s.replace(',', '');
+      if (parts[parts.length - 1].length === 3 && multiplier === 1) {
+        s = s.replace(',', '');
+      } else {
+        s = s.replace(',', '.');
+      }
+    } else if (s.includes('.')) {
+      // Single separator ".": 10.7 (decimal) or 10.000 (thousands)
+      const parts = s.split('.');
+      if (parts[parts.length - 1].length === 3 && multiplier === 1) {
+        s = s.replace(/\./g, '');
+      }
     }
-    
+
     const num = parseFloat(s) || 0;
-    return Math.round(num * multiplier);
+    const finalVal = Math.round(num * multiplier);
+    console.log(`[ParseFollowers] Initial: ${val} -> Final: ${finalVal}`);
+    return finalVal;
   };
 
   const handleSave = async () => {
