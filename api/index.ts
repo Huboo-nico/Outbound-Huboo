@@ -45,7 +45,7 @@ const callGeminiDirect = async (image: string, mimeType: string, prompt: string)
   const apiKey = (process.env.GEMINI_API_KEY || '').trim().replace(/["']/g, '');
   if (!apiKey) throw new Error("GEMINI_API_KEY no configurada");
 
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+  const url = `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
   
   const response = await fetch(url, {
     method: 'POST',
@@ -213,14 +213,14 @@ app.post('/api/analyze', async (req, res) => {
         fn: () => callNvidiaDirect(image, mimeType, prompt) 
       },
       { 
-        name: 'OpenRouter Gemini (Fallback)', 
+        name: 'OpenRouter Gemini (Fallback Free)', 
         key: 'OPENROUTER_API_KEY',
-        fn: () => callOpenRouterDirect(image, mimeType, prompt, 'google/gemini-flash-1.5') 
+        fn: () => callOpenRouterDirect(image, mimeType, prompt, 'google/gemini-flash-1.5:free') 
       },
       { 
-        name: 'OpenRouter GPT-4o (Fallback)', 
+        name: 'OpenRouter Mistral (Fallback Free)', 
         key: 'OPENROUTER_API_KEY',
-        fn: () => callOpenRouterDirect(image, mimeType, prompt, 'openai/gpt-4o-mini') 
+        fn: () => callOpenRouterDirect(image, mimeType, prompt, 'mistralai/pixtral-12b:free') 
       }
     ];
 
