@@ -24,6 +24,26 @@ const getGenAI = () => {
   return new GoogleGenerativeAI(apiKey);
 };
 
+// Robust JSON extraction from AI response
+const extractJson = (text: string) => {
+  try {
+    // Intento 1: Limpieza de markdown blocks
+    const cleanJson = text.replace(/```json\n?|\n?```/g, '').trim();
+    return JSON.parse(cleanJson);
+  } catch (e) {
+    // Intento 2: Buscar bloques { ... } o [ ... ]
+    const match = text.match(/\{[\s\S]*\}|\[[\s\S]*\]/);
+    if (match) {
+      try {
+        return JSON.parse(match[0]);
+      } catch (e2) {
+        throw new Error("No se pudo extraer JSON válido de la respuesta de la IA");
+      }
+    }
+    throw new Error("La IA no devolvió un formato JSON válido");
+  }
+};
+
 // OpenRouter Fallback Helper
 const callOpenRouter = async (image: string, mimeType: string, prompt: string) => {
   const apiKey = (process.env.OPENROUTER_API_KEY || '').trim().replace(/["']/g, '');
@@ -39,7 +59,7 @@ const callOpenRouter = async (image: string, mimeType: string, prompt: string) =
       headers: {
         "Authorization": `Bearer ${apiKey}`,
         "Content-Type": "application/json",
-        "HTTP-Referer": process.env.APP_URL || "https://ai.studio",
+        "HTTP-Referer": process.env.APP_URL || "https://huboo-prospector.vercel.app",
         "X-Title": "Outbound Huboo Prospector"
       },
       body: JSON.stringify({
@@ -62,10 +82,6 @@ const callOpenRouter = async (image: string, mimeType: string, prompt: string) =
     });
 
     const data: any = await response.json();
-    if (data.error) {
-      console.error('OpenRouter Error:', data.error);
-      return null;
-    }
     return data.choices?.[0]?.message?.content || null;
   } catch (error) {
     console.error('OpenRouter Exception:', error);
@@ -216,64 +232,60 @@ app.post('/api/analyze', async (req, res) => {
     const prompt = "Analiza esta captura de pantalla de un perfil de Instagram y extrae la siguiente información en formato JSON: brandName (Nombre de la marca), username (Handle/Username con @), followers (Número de seguidores como entero), industry (Industria/Sector inferido), contact (Email si aparece), phone (Número de teléfono si aparece), profileLink (Link al perfil si se puede inferir).";
 
     try {
-      // Intento 1: Google Gemini Principal (v1beta por compatibilidad)
-      const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" }, { apiVersion: 'v1beta' });
+      // Intento 1: Google Gemini Principal (Versión estándar v1)
+      console.log('Intentando Gemini v1...');
+      const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
       const result = await model.generateContent([
         { inlineData: { mimeType, data: image } },
         { text: prompt },
       ]);
       const response = await result.response;
       const text = response.text();
-      const cleanJson = text.replace(/```json\n?|\n?```/g, '').trim();
-      return res.json(JSON.parse(cleanJson));
+      return res.json(extractJson(text));
     } catch (primaryError: any) {
-      console.error('Iniciando cadena de fallbacks por error en Gemini principal:', primaryError.message);
+      console.error('Error en Gemini v1:', primaryError.message);
       
-      // Fallback 1: Otras versiones de Google
-      const googleFallbacks = [
-        { name: "gemini-1.5-flash-latest", version: 'v1beta' },
-        { name: "gemini-1.5-flash", version: 'v1' },
+      // Cadena de fallbacks
+      const fallbacks = [
+        { type: 'google', name: "gemini-1.5-flash", version: 'v1beta' },
+        { type: 'google', name: "gemini-1.5-flash-latest", version: 'v1beta' },
+        { type: 'openrouter' },
+        { type: 'groq' },
+        { type: 'aiml' }
       ];
 
-      for (const fb of googleFallbacks) {
+      for (const fb of fallbacks) {
         try {
-          console.log(`Intentando fallback Google: ${fb.name}`);
-          const fallbackModel = genAI.getGenerativeModel({ model: fb.name }, { apiVersion: fb.version });
-          const result = await fallbackModel.generateContent([
-            { inlineData: { mimeType, data: image } },
-            { text: prompt },
-          ]);
-          const response = await result.response;
-          const text = response.text();
-          const cleanJson = text.replace(/```json\n?|\n?```/g, '').trim();
-          return res.json(JSON.parse(cleanJson));
+          let text = "";
+          if (fb.type === 'google') {
+            console.log(`Intentando fallback Google: ${fb.name} (${fb.version})`);
+            const fallbackModel = genAI.getGenerativeModel({ model: fb.name! }, { apiVersion: fb.version });
+            const result = await fallbackModel.generateContent([
+              { inlineData: { mimeType, data: image } },
+              { text: prompt },
+            ]);
+            const response = await result.response;
+            text = response.text();
+          } else if (fb.type === 'openrouter') {
+            const orResult = await callOpenRouter(image, mimeType, prompt);
+            if (orResult) text = orResult;
+          } else if (fb.type === 'groq') {
+            const groqResult = await callGroq(image, mimeType, prompt);
+            if (groqResult) text = groqResult;
+          } else if (fb.type === 'aiml') {
+            const aimlResult = await callAIML(image, mimeType, prompt);
+            if (aimlResult) text = aimlResult;
+          }
+
+          if (text) {
+            return res.json(extractJson(text));
+          }
         } catch (e) {
-          console.warn(`Fallback Google ${fb.name} falló`);
+          console.warn(`Fallback ${fb.type} falló`);
         }
       }
 
-      // Fallback 2: OpenRouter
-      const orResult = await callOpenRouter(image, mimeType, prompt);
-      if (orResult) {
-        const cleanJson = orResult.replace(/```json\n?|\n?```/g, '').trim();
-        return res.json(JSON.parse(cleanJson));
-      }
-
-      // Fallback 3: Groq
-      const groqResult = await callGroq(image, mimeType, prompt);
-      if (groqResult) {
-        const cleanJson = groqResult.replace(/```json\n?|\n?```/g, '').trim();
-        return res.json(JSON.parse(cleanJson));
-      }
-
-      // Fallback 4: AI/ML API
-      const aimlResult = await callAIML(image, mimeType, prompt);
-      if (aimlResult) {
-        const cleanJson = aimlResult.replace(/```json\n?|\n?```/g, '').trim();
-        return res.json(JSON.parse(cleanJson));
-      }
-
-      throw new Error(`Error crítico: Todas las APIs de IA fallaron. Verifica tus API Keys en Vercel.`);
+      throw new Error(`Error total: Todas las APIs (Gemini, OpenRouter, Groq, AIML) han fallado o devuelto un formato inválido. Por favor, revisa tus API Keys en Vercel.`);
     }
   } catch (error: any) {
     console.error('Error in /api/analyze:', error);
