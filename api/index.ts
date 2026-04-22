@@ -371,8 +371,39 @@ app.post('/api/prospects', async (req, res) => {
     const { name, username, followers, sector, arr, contact, phone, link } = req.body;
 
     // Calcular ARR usando la fórmula: Followers * 2.15
-    const parsedFollowers = parseInt(followers?.toString().replace(/[^0-9]/g, '') || '0');
-    const calculatedARR = (parsedFollowers * 2.15).toFixed(2) + '€';
+    // Mejoramos el parseo para manejar "1.5K", "10,5K", etc.
+    const parseFollowers = (val: string | number): number => {
+      if (!val) return 0;
+      let s = val.toString().toLowerCase().trim();
+      let multiplier = 1;
+      
+      if (s.endsWith('k')) {
+        multiplier = 1000;
+        s = s.slice(0, -1);
+      } else if (s.endsWith('m')) {
+        multiplier = 1000000;
+        s = s.slice(0, -1);
+      }
+      
+      // Limpiar caracteres no numéricos excepto punto y coma
+      s = s.replace(/[^0-9.,]/g, '');
+      
+      // Manejar formato europeo (coma decimal) vs americano (punto decimal)
+      if (s.includes(',') && s.includes('.')) {
+        if (s.indexOf(',') > s.indexOf('.')) s = s.replace(/\./g, '').replace(',', '.');
+        else s = s.replace(/,/g, '');
+      } else if (s.includes(',')) {
+        const parts = s.split(',');
+        if (parts[parts.length - 1].length <= 2) s = s.replace(',', '.');
+        else s = s.replace(',', '');
+      }
+      
+      const num = parseFloat(s) || 0;
+      return Math.round(num * multiplier);
+    };
+
+    const parsedFollowersNum = parseFollowers(followers);
+    const calculatedARR = (parsedFollowersNum * 2.15).toFixed(2) + '€';
 
     const existing = await sheets.spreadsheets.values.get({
       spreadsheetId: SPREADSHEET_ID,
