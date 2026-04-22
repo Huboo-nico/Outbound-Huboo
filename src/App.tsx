@@ -61,6 +61,23 @@ export default function App() {
   const [totalARR, setTotalARR] = useState(0);
   const [totalProspects, setTotalProspects] = useState(0);
   const [isLoadingData, setIsLoadingData] = useState(true);
+  const [apiStatus, setApiStatus] = useState<{ gemini: boolean; openrouter: boolean; sheets: boolean }>({
+    gemini: false,
+    openrouter: false,
+    sheets: false
+  });
+
+  const checkApiStatus = useCallback(async () => {
+    try {
+      const response = await fetch('/api/health');
+      if (response.ok) {
+        const status = await response.json();
+        setApiStatus(status);
+      }
+    } catch (error) {
+      console.error('Error checking API status:', error);
+    }
+  }, []);
 
   const loadDashboardData = useCallback(async () => {
     try {
@@ -84,7 +101,8 @@ export default function App() {
 
   useEffect(() => {
     loadDashboardData();
-  }, [loadDashboardData]);
+    checkApiStatus();
+  }, [loadDashboardData, checkApiStatus]);
 
   const onDrop = useCallback(async (acceptedFiles: File[]) => {
     const file = acceptedFiles[0];
@@ -228,7 +246,23 @@ export default function App() {
                 <Instagram size={20} className="text-white" />
               </div>
             </div>
-            <h1 className="text-lg font-bold tracking-tight">OUTBOUND <span className="text-white/80">HUBOO</span></h1>
+            <div className="flex flex-col">
+              <h1 className="text-sm font-bold tracking-tight leading-none">OUTBOUND HUBOO</h1>
+              <div className="flex gap-2 mt-1">
+                <div className="flex items-center gap-1">
+                  <div className={`w-1.5 h-1.5 rounded-full ${apiStatus.gemini ? 'bg-green-400 shadow-[0_0_5px_rgba(74,222,128,0.5)]' : 'bg-red-400'}`} title="Gemini Status" />
+                  <span className="text-[8px] opacity-50 uppercase font-bold">GEM</span>
+                </div>
+                <div className="flex items-center gap-1">
+                  <div className={`w-1.5 h-1.5 rounded-full ${apiStatus.openrouter ? 'bg-green-400 shadow-[0_0_5px_rgba(74,222,128,0.5)]' : 'bg-red-400'}`} title="OpenRouter Status" />
+                  <span className="text-[8px] opacity-50 uppercase font-bold">OR</span>
+                </div>
+                <div className="flex items-center gap-1">
+                  <div className={`w-1.5 h-1.5 rounded-full ${apiStatus.sheets ? 'bg-green-400 shadow-[0_0_5px_rgba(74,222,128,0.5)]' : 'bg-red-400'}`} title="Sheets Status" />
+                  <span className="text-[8px] opacity-50 uppercase font-bold">GSH</span>
+                </div>
+              </div>
+            </div>
           </div>
           <div className="flex items-center gap-4">
             <span className="text-xs opacity-70 hidden sm:inline">Sesión: BD Manager (Spain)</span>

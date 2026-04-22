@@ -135,44 +135,70 @@ const getSpreadsheetId = () => {
 const SPREADSHEET_ID = getSpreadsheetId();
 const RANGE = 'Sheet1!A:I';
 
+// AI Models Health Check
+app.get('/api/health', async (req, res) => {
+  const status = {
+    gemini: !!process.env.GEMINI_API_KEY,
+    openrouter: !!process.env.OPENROUTER_API_KEY,
+    sheets: !!(process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL && process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY && process.env.GOOGLE_SHEETS_ID)
+  };
+  res.json(status);
+});
+
 // API Routes
 app.post('/api/analyze', async (req, res) => {
   try {
     const { image, mimeType } = req.body;
     if (!image || !mimeType) return res.status(400).json({ error: 'Imagen requerida' });
 
-    const prompt = "Analiza esta captura de pantalla de un perfil de Instagram y extrae la siguiente información en formato JSON: brandName (Nombre de la marca), username (Handle/Username con @), followers (Número de seguidores como entero o string con K/M), industry (Industria/Sector inferido), contact (Email si aparece), phone (Número de teléfono si aparece), profileLink (Link al perfil si se puede inferir).";
+    const prompt = "Analiza esta captura de pantalla de un perfil de Instagram y extrae la siguiente información en formato JSON: brandName (Nombre de la marca), username (Handle/Username con @), followers (Número de seguidores como entero o string con K/M), industry (Industria/Sector inferido), contact (Email si aparece), phone (Número de teléfono si aparece), profileLink (Link al perfil si se puede inferir). RESPONDE SOLO EL JSON.";
 
     const attempts = [
-      { type: 'google' },
-      { type: 'openrouter', model: 'google/gemini-flash-1.5' },
-      { type: 'openrouter', model: 'openai/gpt-4o-mini' }
+      { name: 'Gemini (Directo)', type: 'google' },
+      { name: 'OpenRouter (Gemini)', type: 'openrouter', model: 'google/gemini-flash-1.5' },
+      { name: 'OpenRouter (GPT-4o)', type: 'openrouter', model: 'openai/gpt-4o-mini' }
     ];
+
+    let lastErrorMessage = "";
 
     for (let i = 0; i < attempts.length; i++) {
       const attempt = attempts[i];
       try {
-        console.log(`[Analizando] Intento ${i + 1}: ${attempt.type}`);
+        console.log(`[Analizando] Intento ${i + 1}: ${attempt.name}`);
         let text = "";
 
         if (attempt.type === 'google') {
-          text = await callGeminiDirect(image, mimeType, prompt);
+          // Re-intentamos con el SDK oficial si falla el REST o viceversa
+          try {
+            text = await callGeminiDirect(image, mimeType, prompt);
+          } catch (restErr) {
+            console.warn("REST falló, probando SDK...");
+            const genAI = getGenAI();
+            if (!genAI) throw restErr;
+            const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+            const result = await model.generateContent([
+              { inlineData: { mimeType, data: image } },
+              { text: prompt },
+            ]);
+            text = (await result.response).text();
+          }
         } else {
           text = await callOpenRouterDirect(image, mimeType, prompt, attempt.model!);
         }
 
         if (text) {
           const jsonData = extractJson(text);
-          console.log(`[Éxito] Analizado con ${attempt.type}`);
+          console.log(`[Éxito] Analizado con ${attempt.name}`);
           return res.json(jsonData);
         }
       } catch (err: any) {
-        console.error(`[Error] Intento ${i + 1} falló:`, err.message);
-        if (i < attempts.length - 1) await new Promise(r => setTimeout(r, 400));
+        console.error(`[Error] Intento ${i + 1} (${attempt.name}) falló:`, err.message);
+        lastErrorMessage = err.message;
+        if (i < attempts.length - 1) await new Promise(r => setTimeout(r, 500));
       }
     }
 
-    throw new Error("No ha sido posible conectar con la IA. Por favor, revisa tus API Keys en Vercel.");
+    throw new Error(`Error en el análisis tras varios intentos. Último error: ${lastErrorMessage}. Verifica tus API Keys en Vercel.`);
   } catch (error: any) {
     console.error('Error in /api/analyze:', error);
     res.status(500).json({ error: error.message });
